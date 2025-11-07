@@ -29,6 +29,19 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -66,6 +79,7 @@ export default function TranscriptionHistory() {
   const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
   const [deleteLogId, setDeleteLogId] = useState<string | null>(null);
+  const [selectedStatuses, setSelectedStatuses] = useState<Set<string>>(new Set(['completed', 'processing', 'failed']));
 
   useEffect(() => {
     checkAuth();
@@ -115,7 +129,7 @@ export default function TranscriptionHistory() {
   useEffect(() => {
     filterLogs();
     setCurrentPage(1); // Reset to first page when filters or sort changes
-  }, [searchQuery, startDate, endDate, logs, sortField, sortDirection]);
+  }, [searchQuery, startDate, endDate, logs, sortField, sortDirection, selectedStatuses]);
 
   const checkAuth = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -148,6 +162,13 @@ export default function TranscriptionHistory() {
     if (searchQuery) {
       filtered = filtered.filter((log) =>
         log.file_title.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+    }
+
+    // Status filter
+    if (selectedStatuses.size > 0 && selectedStatuses.size < 3) {
+      filtered = filtered.filter((log) =>
+        selectedStatuses.has(log.status.toLowerCase())
       );
     }
 
@@ -293,6 +314,17 @@ export default function TranscriptionHistory() {
     setCurrentPage(1);
     setSortField(null);
     setSortDirection(null);
+    setSelectedStatuses(new Set(['completed', 'processing', 'failed']));
+  };
+
+  const toggleStatus = (status: string) => {
+    const newStatuses = new Set(selectedStatuses);
+    if (newStatuses.has(status)) {
+      newStatuses.delete(status);
+    } else {
+      newStatuses.add(status);
+    }
+    setSelectedStatuses(newStatuses);
   };
 
   const handleSort = (field: SortField) => {
@@ -469,7 +501,7 @@ export default function TranscriptionHistory() {
           </CardHeader>
           <CardContent className="space-y-6">
             {/* Filters */}
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-4">
               <div className="space-y-2">
                 <Label htmlFor="search">Search by filename</Label>
                 <div className="relative">
@@ -482,6 +514,64 @@ export default function TranscriptionHistory() {
                     className="pl-10"
                   />
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Filter by Status</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-between">
+                      <span>
+                        {selectedStatuses.size === 3 
+                          ? 'All Statuses' 
+                          : selectedStatuses.size === 0
+                          ? 'No Status'
+                          : `${selectedStatuses.size} selected`}
+                      </span>
+                      <Filter className="ml-2 h-4 w-4 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[200px] p-0 bg-popover z-50" align="start">
+                    <Command>
+                      <CommandList>
+                        <CommandGroup>
+                          <CommandItem
+                            onSelect={() => toggleStatus('completed')}
+                            className="cursor-pointer"
+                          >
+                            <Checkbox
+                              checked={selectedStatuses.has('completed')}
+                              className="mr-2"
+                            />
+                            <CheckCircle2 className="mr-2 h-4 w-4 text-green-600" />
+                            Completed
+                          </CommandItem>
+                          <CommandItem
+                            onSelect={() => toggleStatus('processing')}
+                            className="cursor-pointer"
+                          >
+                            <Checkbox
+                              checked={selectedStatuses.has('processing')}
+                              className="mr-2"
+                            />
+                            <Badge variant="secondary" className="mr-2">Processing</Badge>
+                          </CommandItem>
+                          <CommandItem
+                            onSelect={() => toggleStatus('failed')}
+                            className="cursor-pointer"
+                          >
+                            <Checkbox
+                              checked={selectedStatuses.has('failed')}
+                              className="mr-2"
+                            />
+                            <XCircle className="mr-2 h-4 w-4 text-red-600" />
+                            Failed
+                          </CommandItem>
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
 
               <div className="space-y-2">
