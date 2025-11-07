@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet, Columns3 } from "lucide-react";
+import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet, Columns3, HelpCircle, Keyboard } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import {
@@ -139,6 +139,7 @@ export default function TranscriptionHistory() {
       actions: true,
     }
   );
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
 
   // Save filter preferences whenever they change
   useEffect(() => {
@@ -649,8 +650,12 @@ export default function TranscriptionHistory() {
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore shortcuts when typing in input fields
+      const target = e.target as HTMLElement;
+      const isInputField = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA';
+      
       // Ctrl/Cmd + A: Select all visible transcriptions with text
-      if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a' && !isInputField) {
         e.preventDefault();
         const visibleWithText = paginatedLogs
           .filter(log => log.transcription_text)
@@ -661,16 +666,50 @@ export default function TranscriptionHistory() {
         }
       }
 
-      // Delete key: Export selected items
-      if (e.key === 'Delete' && selectedIds.size > 0) {
+      // Ctrl/Cmd + E: Export selected items
+      if ((e.ctrlKey || e.metaKey) && e.key === 'e' && !isInputField) {
         e.preventDefault();
-        handleBulkExport();
+        if (selectedIds.size > 0) {
+          handleBulkExport();
+        } else {
+          toast.info('No transcriptions selected for export');
+        }
       }
 
-      // Escape: Clear filters and selections
+      // Ctrl/Cmd + F: Focus content search
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault();
+        const contentSearchInput = document.getElementById('contentSearch') as HTMLInputElement;
+        if (contentSearchInput) {
+          contentSearchInput.focus();
+          contentSearchInput.select();
+        }
+      }
+
+      // F5: Refresh
+      if (e.key === 'F5') {
+        e.preventDefault();
+        handleRefresh();
+      }
+
+      // Delete key: Delete selected items
+      if (e.key === 'Delete' && selectedIds.size > 0 && !isInputField) {
+        e.preventDefault();
+        handleBulkDelete();
+      }
+
+      // ?: Show keyboard shortcuts help
+      if (e.shiftKey && e.key === '?' && !isInputField) {
+        e.preventDefault();
+        setShowShortcutsHelp(true);
+      }
+
+      // Escape: Clear filters, selections, or close help modal
       if (e.key === 'Escape') {
         e.preventDefault();
-        if (selectedIds.size > 0 || searchQuery || contentSearchQuery || startDate || endDate || 
+        if (showShortcutsHelp) {
+          setShowShortcutsHelp(false);
+        } else if (selectedIds.size > 0 || searchQuery || contentSearchQuery || startDate || endDate || 
             sortField || selectedStatuses.size !== 3) {
           handleClearFilters();
           setSelectedIds(new Set());
@@ -681,7 +720,7 @@ export default function TranscriptionHistory() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [paginatedLogs, selectedIds, searchQuery, contentSearchQuery, startDate, endDate, sortField, selectedStatuses]);
+  }, [paginatedLogs, selectedIds, searchQuery, contentSearchQuery, startDate, endDate, sortField, selectedStatuses, showShortcutsHelp]);
 
   // Helper function to highlight matching text
   const highlightText = (text: string, query: string) => {
@@ -813,12 +852,17 @@ export default function TranscriptionHistory() {
                 <CardTitle>Transcription History</CardTitle>
                 <CardDescription>
                   View all your past transcriptions with search and filtering
-                  <span className="block mt-1 text-xs">
-                    <kbd className="px-2 py-1 text-xs font-semibold text-muted-foreground bg-muted border border-border rounded">Ctrl/Cmd+A</kbd> Select all • 
-                    <kbd className="px-2 py-1 text-xs font-semibold text-muted-foreground bg-muted border border-border rounded ml-1">Delete</kbd> Export selected • 
-                    <kbd className="px-2 py-1 text-xs font-semibold text-muted-foreground bg-muted border border-border rounded ml-1">Esc</kbd> Clear filters
-                  </span>
                 </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowShortcutsHelp(true)}
+                  title="Keyboard shortcuts"
+                >
+                  <Keyboard className="h-4 w-4" />
+                </Button>
               </div>
               <div className="flex items-center gap-2">
                 {lastUpdated && (
@@ -1302,6 +1346,93 @@ export default function TranscriptionHistory() {
           </div>
         </div>
       </main>
+
+      {/* Keyboard Shortcuts Help Dialog */}
+      <Dialog open={showShortcutsHelp} onOpenChange={setShowShortcutsHelp}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Keyboard className="h-5 w-5" />
+              Keyboard Shortcuts
+            </DialogTitle>
+            <DialogDescription>
+              Speed up your workflow with these keyboard shortcuts
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-6">
+            <div>
+              <h3 className="text-sm font-semibold mb-3">Selection</h3>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between py-2 px-3 rounded-md hover:bg-muted/50">
+                  <span className="text-sm">Select all transcriptions on page</span>
+                  <kbd className="px-2 py-1 text-xs font-semibold bg-muted border border-border rounded">
+                    Ctrl/Cmd + A
+                  </kbd>
+                </div>
+                <div className="flex items-center justify-between py-2 px-3 rounded-md hover:bg-muted/50">
+                  <span className="text-sm">Clear selection & filters</span>
+                  <kbd className="px-2 py-1 text-xs font-semibold bg-muted border border-border rounded">
+                    Esc
+                  </kbd>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-sm font-semibold mb-3">Actions</h3>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between py-2 px-3 rounded-md hover:bg-muted/50">
+                  <span className="text-sm">Export selected transcriptions</span>
+                  <kbd className="px-2 py-1 text-xs font-semibold bg-muted border border-border rounded">
+                    Ctrl/Cmd + E
+                  </kbd>
+                </div>
+                <div className="flex items-center justify-between py-2 px-3 rounded-md hover:bg-muted/50">
+                  <span className="text-sm">Delete selected transcriptions</span>
+                  <kbd className="px-2 py-1 text-xs font-semibold bg-muted border border-border rounded">
+                    Delete
+                  </kbd>
+                </div>
+                <div className="flex items-center justify-between py-2 px-3 rounded-md hover:bg-muted/50">
+                  <span className="text-sm">Refresh transcription history</span>
+                  <kbd className="px-2 py-1 text-xs font-semibold bg-muted border border-border rounded">
+                    F5
+                  </kbd>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-sm font-semibold mb-3">Navigation</h3>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between py-2 px-3 rounded-md hover:bg-muted/50">
+                  <span className="text-sm">Focus content search</span>
+                  <kbd className="px-2 py-1 text-xs font-semibold bg-muted border border-border rounded">
+                    Ctrl/Cmd + F
+                  </kbd>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-sm font-semibold mb-3">Help</h3>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between py-2 px-3 rounded-md hover:bg-muted/50">
+                  <span className="text-sm">Show this help dialog</span>
+                  <kbd className="px-2 py-1 text-xs font-semibold bg-muted border border-border rounded">
+                    Shift + ?
+                  </kbd>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-end mt-4">
+            <Button onClick={() => setShowShortcutsHelp(false)}>
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* View Details Dialog */}
       <Dialog open={!!selectedLog} onOpenChange={() => setSelectedLog(null)}>
