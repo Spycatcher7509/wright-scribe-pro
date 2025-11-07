@@ -8,3 +8,6 @@ verify_jwt = true
 
 [functions.transcribe-audio]
 verify_jwt = true
+
+[functions.transcribe-youtube]
+verify_jwt = true
