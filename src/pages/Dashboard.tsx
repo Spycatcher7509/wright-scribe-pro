@@ -191,9 +191,9 @@ export default function Dashboard() {
               <FileAudio className="mr-2 h-4 w-4" />
               Transcribe
             </TabsTrigger>
-            <TabsTrigger value="logs">
+            <TabsTrigger value="logs" onClick={() => navigate("/history")}>
               <History className="mr-2 h-4 w-4" />
-              Activity Logs
+              History
             </TabsTrigger>
             <TabsTrigger value="tickets">
               <Mail className="mr-2 h-4 w-4" />
