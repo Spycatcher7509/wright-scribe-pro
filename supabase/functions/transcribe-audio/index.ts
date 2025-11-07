@@ -1,6 +1,7 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.80.0";
+import { Resend } from "https://esm.sh/resend@2.0.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -8,6 +9,64 @@ const corsHeaders = {
 };
 
 const openAIApiKey = Deno.env.get("OPENAI_API_KEY");
+const resend = new Resend(Deno.env.get("RESEND_API_KEY") as string);
+
+const createEmailHTML = (fileName: string, transcriptionText: string, duration?: number, language?: string, timestamp?: string) => {
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Transcription Complete</title>
+</head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f6f9fc; margin: 0; padding: 20px;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden;">
+    <tr>
+      <td style="padding: 40px 40px 20px;">
+        <h1 style="color: #333; font-size: 24px; font-weight: bold; margin: 0 0 20px;">Transcription Complete</h1>
+        <p style="color: #333; font-size: 14px; line-height: 24px; margin: 0 0 24px;">Your audio transcription has been successfully processed.</p>
+        
+        <div style="margin: 24px 0;">
+          <p style="color: #666; font-size: 12px; font-weight: bold; text-transform: uppercase; margin: 8px 0 4px; letter-spacing: 0.5px;">File Name:</p>
+          <p style="color: #333; font-size: 14px; margin: 0 0 12px;">${fileName}</p>
+          
+          ${duration ? `
+          <p style="color: #666; font-size: 12px; font-weight: bold; text-transform: uppercase; margin: 8px 0 4px; letter-spacing: 0.5px;">Duration:</p>
+          <p style="color: #333; font-size: 14px; margin: 0 0 12px;">${Math.round(duration)} seconds</p>
+          ` : ''}
+          
+          ${language ? `
+          <p style="color: #666; font-size: 12px; font-weight: bold; text-transform: uppercase; margin: 8px 0 4px; letter-spacing: 0.5px;">Language:</p>
+          <p style="color: #333; font-size: 14px; margin: 0 0 12px;">${language}</p>
+          ` : ''}
+          
+          ${timestamp ? `
+          <p style="color: #666; font-size: 12px; font-weight: bold; text-transform: uppercase; margin: 8px 0 4px; letter-spacing: 0.5px;">Completed:</p>
+          <p style="color: #333; font-size: 14px; margin: 0 0 12px;">${timestamp}</p>
+          ` : ''}
+        </div>
+        
+        <hr style="border: none; border-top: 1px solid #e6ebf1; margin: 20px 0;">
+        
+        <h2 style="color: #333; font-size: 18px; font-weight: bold; margin: 20px 0 12px;">Transcription</h2>
+        <div style="background-color: #f4f4f4; border-radius: 5px; border: 1px solid #eee; padding: 20px; margin: 0 0 20px;">
+          <p style="color: #333; font-size: 14px; line-height: 22px; margin: 0; white-space: pre-wrap;">${transcriptionText}</p>
+        </div>
+        
+        <hr style="border: none; border-top: 1px solid #e6ebf1; margin: 20px 0;">
+        
+        <p style="color: #8898aa; font-size: 12px; line-height: 16px; margin: 32px 0 0;">
+          This is an automated message from The Wright Scriber Pro.<br>
+          If you did not request this transcription, please contact support.
+        </p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+};
 
 serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -114,6 +173,44 @@ serve(async (req: Request) => {
         status: "completed",
       })
       .eq("id", logEntry.id);
+
+    // Send email notification
+    try {
+      const timestamp = new Date().toLocaleString("en-GB", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+
+      const html = createEmailHTML(
+        fileName,
+        result.text,
+        result.duration,
+        result.language,
+        timestamp
+      );
+
+      const { error: emailError } = await resend.emails.send({
+        from: "The Wright Scriber Pro <onboarding@resend.dev>",
+        to: [user.email!],
+        subject: `Transcription Complete: ${fileName}`,
+        html,
+      });
+
+      if (emailError) {
+        console.error("Error sending email:", emailError);
+        // Don't fail the request if email fails
+      } else {
+        console.log(`Email sent successfully to ${user.email}`);
+      }
+    } catch (emailError) {
+      console.error("Error sending email notification:", emailError);
+      // Don't fail the request if email fails
+    }
 
     return new Response(
       JSON.stringify({
