@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.reset-user-password]
 verify_jwt = true
+
+[functions.transcribe-audio]
+verify_jwt = true

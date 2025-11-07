@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { LogOut, FileAudio, History, Mail, Database, Users, Shield } from "lucide-react";
 import { toast } from "sonner";
 import { DisclaimerModal } from "@/components/DisclaimerModal";
+import { TranscriptionUpload } from "@/components/TranscriptionUpload";
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -211,12 +212,7 @@ export default function Dashboard() {
           </TabsList>
 
           <TabsContent value="transcribe">
-            <Card className="p-6">
-              <h2 className="text-xl font-semibold mb-4">Audio Transcription</h2>
-              <p className="text-muted-foreground">
-                Transcription feature coming soon. Upload audio files or paste YouTube URLs to transcribe.
-              </p>
-            </Card>
+            <TranscriptionUpload />
           </TabsContent>
 
           <TabsContent value="logs">
