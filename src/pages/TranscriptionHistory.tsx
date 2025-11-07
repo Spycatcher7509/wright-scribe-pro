@@ -63,26 +63,78 @@ interface TranscriptionLog {
 type SortField = 'file_title' | 'status' | 'created_at';
 type SortDirection = 'asc' | 'desc' | null;
 
+const FILTER_STORAGE_KEY = 'transcription_history_filters';
+
+interface FilterPreferences {
+  searchQuery: string;
+  startDate: string;
+  endDate: string;
+  selectedStatuses: string[];
+  pageSize: number;
+  sortField: SortField | null;
+  sortDirection: SortDirection;
+}
+
+const loadFilterPreferences = (): Partial<FilterPreferences> => {
+  try {
+    const stored = localStorage.getItem(FILTER_STORAGE_KEY);
+    if (stored) {
+      return JSON.parse(stored);
+    }
+  } catch (error) {
+    console.error('Error loading filter preferences:', error);
+  }
+  return {};
+};
+
+const saveFilterPreferences = (preferences: FilterPreferences) => {
+  try {
+    localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(preferences));
+  } catch (error) {
+    console.error('Error saving filter preferences:', error);
+  }
+};
+
 export default function TranscriptionHistory() {
   const navigate = useNavigate();
   const [logs, setLogs] = useState<TranscriptionLog[]>([]);
   const [filteredLogs, setFilteredLogs] = useState<TranscriptionLog[]>([]);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  
+  // Load saved preferences
+  const savedPrefs = loadFilterPreferences();
+  
+  const [searchQuery, setSearchQuery] = useState(savedPrefs.searchQuery || "");
+  const [startDate, setStartDate] = useState(savedPrefs.startDate || "");
+  const [endDate, setEndDate] = useState(savedPrefs.endDate || "");
   const [selectedLog, setSelectedLog] = useState<TranscriptionLog | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(savedPrefs.pageSize || 10);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isExporting, setIsExporting] = useState(false);
-  const [sortField, setSortField] = useState<SortField | null>(null);
-  const [sortDirection, setSortDirection] = useState<SortDirection>(null);
+  const [sortField, setSortField] = useState<SortField | null>(savedPrefs.sortField || null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>(savedPrefs.sortDirection || null);
   const [deleteLogId, setDeleteLogId] = useState<string | null>(null);
-  const [selectedStatuses, setSelectedStatuses] = useState<Set<string>>(new Set(['completed', 'processing', 'failed']));
+  const [selectedStatuses, setSelectedStatuses] = useState<Set<string>>(
+    new Set(savedPrefs.selectedStatuses || ['completed', 'processing', 'failed'])
+  );
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [newlyUpdatedIds, setNewlyUpdatedIds] = useState<Set<string>>(new Set());
+
+  // Save filter preferences whenever they change
+  useEffect(() => {
+    const preferences: FilterPreferences = {
+      searchQuery,
+      startDate,
+      endDate,
+      selectedStatuses: Array.from(selectedStatuses),
+      pageSize,
+      sortField,
+      sortDirection,
+    };
+    saveFilterPreferences(preferences);
+  }, [searchQuery, startDate, endDate, selectedStatuses, pageSize, sortField, sortDirection]);
 
 
   useEffect(() => {
