@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
+import JSZip from "jszip";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import {
@@ -46,6 +48,8 @@ export default function TranscriptionHistory() {
   const [isLoading, setIsLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
     checkAuth();
@@ -183,6 +187,67 @@ export default function TranscriptionHistory() {
     toast.success("Transcription downloaded!");
   };
 
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      const pageIds = paginatedLogs
+        .filter(log => log.transcription_text)
+        .map(log => log.id);
+      setSelectedIds(new Set(pageIds));
+    } else {
+      setSelectedIds(new Set());
+    }
+  };
+
+  const handleSelectOne = (id: string, checked: boolean) => {
+    const newSelected = new Set(selectedIds);
+    if (checked) {
+      newSelected.add(id);
+    } else {
+      newSelected.delete(id);
+    }
+    setSelectedIds(newSelected);
+  };
+
+  const handleBulkExport = async () => {
+    if (selectedIds.size === 0) {
+      toast.error("No transcriptions selected");
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const zip = new JSZip();
+      
+      // Add each selected transcription to the ZIP
+      selectedIds.forEach(id => {
+        const log = logs.find(l => l.id === id);
+        if (log?.transcription_text) {
+          const filename = `${log.file_title.replace(/[^a-z0-9]/gi, "_")}_transcription.txt`;
+          zip.file(filename, log.transcription_text);
+        }
+      });
+
+      // Generate the ZIP file
+      const content = await zip.generateAsync({ type: "blob" });
+      
+      // Download the ZIP
+      const url = URL.createObjectURL(content);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `transcriptions_export_${new Date().toISOString().split('T')[0]}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      toast.success(`Exported ${selectedIds.size} transcription(s)`);
+      setSelectedIds(new Set()); // Clear selection after export
+    } catch (error) {
+      console.error("Error exporting transcriptions:", error);
+      toast.error("Failed to export transcriptions");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const handleClearFilters = () => {
     setSearchQuery("");
     setStartDate("");
@@ -205,6 +270,7 @@ export default function TranscriptionHistory() {
   const goToLastPage = () => setCurrentPage(totalPages);
   const goToPreviousPage = () => setCurrentPage(prev => Math.max(1, prev - 1));
   const goToNextPage = () => setCurrentPage(prev => Math.min(totalPages, prev + 1));
+
 
   return (
     <div className="min-h-screen bg-background">
@@ -269,6 +335,17 @@ export default function TranscriptionHistory() {
                   <Filter className="mr-2 h-4 w-4" />
                   Clear Filters
                 </Button>
+                {selectedIds.size > 0 && (
+                  <Button 
+                    variant="default" 
+                    size="sm" 
+                    onClick={handleBulkExport}
+                    disabled={isExporting}
+                  >
+                    <FileArchive className="mr-2 h-4 w-4" />
+                    {isExporting ? "Exporting..." : `Export Selected (${selectedIds.size})`}
+                  </Button>
+                )}
                 <span className="text-sm text-muted-foreground">
                   Showing {startIndex + 1}-{Math.min(endIndex, filteredLogs.length)} of {filteredLogs.length} transcriptions
                 </span>
@@ -297,6 +374,15 @@ export default function TranscriptionHistory() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-[50px]">
+                      <Checkbox 
+                        checked={
+                          paginatedLogs.filter(log => log.transcription_text).length > 0 &&
+                          paginatedLogs.filter(log => log.transcription_text).every(log => selectedIds.has(log.id))
+                        }
+                        onCheckedChange={handleSelectAll}
+                      />
+                    </TableHead>
                     <TableHead>File Title</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Created</TableHead>
@@ -306,25 +392,32 @@ export default function TranscriptionHistory() {
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
                         Loading transcription history...
                       </TableCell>
                     </TableRow>
                   ) : filteredLogs.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
                         No transcriptions found
                       </TableCell>
                     </TableRow>
                   ) : paginatedLogs.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
                         No transcriptions on this page
                       </TableCell>
                     </TableRow>
                   ) : (
                     paginatedLogs.map((log) => (
                       <TableRow key={log.id}>
+                        <TableCell>
+                          <Checkbox 
+                            checked={selectedIds.has(log.id)}
+                            onCheckedChange={(checked) => handleSelectOne(log.id, checked as boolean)}
+                            disabled={!log.transcription_text}
+                          />
+                        </TableCell>
                         <TableCell className="font-medium">{log.file_title}</TableCell>
                         <TableCell>{getStatusBadge(log.status)}</TableCell>
                         <TableCell>{formatDate(log.created_at)}</TableCell>
