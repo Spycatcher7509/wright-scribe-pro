@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import {
@@ -18,6 +18,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Select,
   SelectContent,
@@ -55,6 +65,7 @@ export default function TranscriptionHistory() {
   const [isExporting, setIsExporting] = useState(false);
   const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
+  const [deleteLogId, setDeleteLogId] = useState<string | null>(null);
 
   useEffect(() => {
     checkAuth();
@@ -313,6 +324,36 @@ export default function TranscriptionHistory() {
     return <ArrowUpDown className="ml-2 h-4 w-4 text-muted-foreground" />;
   };
 
+  const handleDeleteTranscription = async () => {
+    if (!deleteLogId) return;
+
+    try {
+      const { error } = await supabase
+        .from("transcription_logs")
+        .delete()
+        .eq("id", deleteLogId);
+
+      if (error) {
+        throw error;
+      }
+
+      toast.success("Transcription deleted successfully");
+      setDeleteLogId(null);
+      
+      // Remove from local state
+      setLogs(prev => prev.filter(log => log.id !== deleteLogId));
+      
+      // Clear from selection if it was selected
+      if (selectedIds.has(deleteLogId)) {
+        const newSelected = new Set(selectedIds);
+        newSelected.delete(deleteLogId);
+        setSelectedIds(newSelected);
+      }
+    } catch (error) {
+      console.error("Error deleting transcription:", error);
+      toast.error("Failed to delete transcription");
+    }
+  };
 
   const handlePageSizeChange = (value: string) => {
     setPageSize(Number(value));
@@ -527,6 +568,15 @@ export default function TranscriptionHistory() {
                                 <Download className="h-4 w-4" />
                               </Button>
                             )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setDeleteLogId(log.id)}
+                              title="Delete transcription"
+                              className="text-destructive hover:text-destructive"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -664,6 +714,35 @@ export default function TranscriptionHistory() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteLogId} onOpenChange={() => setDeleteLogId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Transcription</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this transcription? This action cannot be undone.
+              {deleteLogId && (() => {
+                const log = logs.find(l => l.id === deleteLogId);
+                return log ? (
+                  <div className="mt-2 p-2 bg-muted rounded text-sm">
+                    <strong>{log.file_title}</strong>
+                  </div>
+                ) : null;
+              })()}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleDeleteTranscription}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
