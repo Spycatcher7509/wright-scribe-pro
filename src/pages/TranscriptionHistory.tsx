@@ -131,6 +131,7 @@ export default function TranscriptionHistory() {
     setCurrentPage(1); // Reset to first page when filters or sort changes
   }, [searchQuery, startDate, endDate, logs, sortField, sortDirection, selectedStatuses]);
 
+
   const checkAuth = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
@@ -403,6 +404,43 @@ export default function TranscriptionHistory() {
   const goToPreviousPage = () => setCurrentPage(prev => Math.max(1, prev - 1));
   const goToNextPage = () => setCurrentPage(prev => Math.min(totalPages, prev + 1));
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl/Cmd + A: Select all visible transcriptions with text
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+        e.preventDefault();
+        const visibleWithText = paginatedLogs
+          .filter(log => log.transcription_text)
+          .map(log => log.id);
+        setSelectedIds(new Set(visibleWithText));
+        if (visibleWithText.length > 0) {
+          toast.success(`Selected ${visibleWithText.length} transcription(s)`);
+        }
+      }
+
+      // Delete key: Export selected items
+      if (e.key === 'Delete' && selectedIds.size > 0) {
+        e.preventDefault();
+        handleBulkExport();
+      }
+
+      // Escape: Clear filters and selections
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (selectedIds.size > 0 || searchQuery || startDate || endDate || 
+            sortField || selectedStatuses.size !== 3) {
+          handleClearFilters();
+          setSelectedIds(new Set());
+          toast.info('Cleared filters and selections');
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [paginatedLogs, selectedIds, searchQuery, startDate, endDate, sortField, selectedStatuses]);
+
   // Calculate statistics
   const totalTranscriptions = logs.length;
   const completedCount = logs.filter(log => log.status === 'completed').length;
@@ -497,6 +535,11 @@ export default function TranscriptionHistory() {
             <CardTitle>Transcription History</CardTitle>
             <CardDescription>
               View all your past transcriptions with search and filtering
+              <span className="block mt-1 text-xs">
+                <kbd className="px-2 py-1 text-xs font-semibold text-muted-foreground bg-muted border border-border rounded">Ctrl/Cmd+A</kbd> Select all • 
+                <kbd className="px-2 py-1 text-xs font-semibold text-muted-foreground bg-muted border border-border rounded ml-1">Delete</kbd> Export selected • 
+                <kbd className="px-2 py-1 text-xs font-semibold text-muted-foreground bg-muted border border-border rounded ml-1">Esc</kbd> Clear filters
+              </span>
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
