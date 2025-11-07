@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet } from "lucide-react";
+import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet, Columns3 } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import {
@@ -74,6 +74,14 @@ interface FilterPreferences {
   pageSize: number;
   sortField: SortField | null;
   sortDirection: SortDirection;
+  visibleColumns: ColumnVisibility;
+}
+
+interface ColumnVisibility {
+  fileTitle: boolean;
+  status: boolean;
+  created: boolean;
+  actions: boolean;
 }
 
 const loadFilterPreferences = (): Partial<FilterPreferences> => {
@@ -123,6 +131,14 @@ export default function TranscriptionHistory() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [newlyUpdatedIds, setNewlyUpdatedIds] = useState<Set<string>>(new Set());
+  const [visibleColumns, setVisibleColumns] = useState<ColumnVisibility>(
+    savedPrefs.visibleColumns || {
+      fileTitle: true,
+      status: true,
+      created: true,
+      actions: true,
+    }
+  );
 
   // Save filter preferences whenever they change
   useEffect(() => {
@@ -135,9 +151,10 @@ export default function TranscriptionHistory() {
       pageSize,
       sortField,
       sortDirection,
+      visibleColumns,
     };
     saveFilterPreferences(preferences);
-  }, [searchQuery, contentSearchQuery, startDate, endDate, selectedStatuses, pageSize, sortField, sortDirection]);
+  }, [searchQuery, contentSearchQuery, startDate, endDate, selectedStatuses, pageSize, sortField, sortDirection, visibleColumns]);
 
 
   useEffect(() => {
@@ -686,6 +703,20 @@ export default function TranscriptionHistory() {
     );
   };
 
+  // Toggle column visibility
+  const toggleColumn = (column: keyof ColumnVisibility) => {
+    setVisibleColumns(prev => ({
+      ...prev,
+      [column]: !prev[column]
+    }));
+  };
+
+  // Count visible columns for table colSpan
+  const getColSpan = () => {
+    return 1 + // checkbox column
+      Object.values(visibleColumns).filter(Boolean).length;
+  };
+
   // Calculate statistics
   const totalTranscriptions = logs.length;
   const completedCount = logs.filter(log => log.status === 'completed').length;
@@ -932,6 +963,76 @@ export default function TranscriptionHistory() {
                   <Filter className="mr-2 h-4 w-4" />
                   Clear Filters
                 </Button>
+                
+                {/* Column Visibility Toggle */}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      <Columns3 className="mr-2 h-4 w-4" />
+                      Columns
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-56 bg-card border shadow-lg z-50" align="start">
+                    <div className="space-y-2">
+                      <h4 className="font-medium text-sm">Toggle Columns</h4>
+                      <div className="space-y-2">
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id="col-fileTitle"
+                            checked={visibleColumns.fileTitle}
+                            onCheckedChange={() => toggleColumn('fileTitle')}
+                          />
+                          <label
+                            htmlFor="col-fileTitle"
+                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                          >
+                            File Title
+                          </label>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id="col-status"
+                            checked={visibleColumns.status}
+                            onCheckedChange={() => toggleColumn('status')}
+                          />
+                          <label
+                            htmlFor="col-status"
+                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                          >
+                            Status
+                          </label>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id="col-created"
+                            checked={visibleColumns.created}
+                            onCheckedChange={() => toggleColumn('created')}
+                          />
+                          <label
+                            htmlFor="col-created"
+                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                          >
+                            Created Date
+                          </label>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            id="col-actions"
+                            checked={visibleColumns.actions}
+                            onCheckedChange={() => toggleColumn('actions')}
+                          />
+                          <label
+                            htmlFor="col-actions"
+                            className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                          >
+                            Actions
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+
                 {selectedIds.size > 0 && (
                   <Button 
                     variant="default" 
@@ -978,57 +1079,65 @@ export default function TranscriptionHistory() {
                           paginatedLogs.filter(log => log.transcription_text).every(log => selectedIds.has(log.id))
                         }
                         onCheckedChange={handleSelectAll}
-                      />
+                     />
                     </TableHead>
-                    <TableHead>
-                      <Button
-                        variant="ghost"
-                        onClick={() => handleSort('file_title')}
-                        className="h-8 p-0 hover:bg-transparent"
-                      >
-                        File Title
-                        {getSortIcon('file_title')}
-                      </Button>
-                    </TableHead>
-                    <TableHead>
-                      <Button
-                        variant="ghost"
-                        onClick={() => handleSort('status')}
-                        className="h-8 p-0 hover:bg-transparent"
-                      >
-                        Status
-                        {getSortIcon('status')}
-                      </Button>
-                    </TableHead>
-                    <TableHead>
-                      <Button
-                        variant="ghost"
-                        onClick={() => handleSort('created_at')}
-                        className="h-8 p-0 hover:bg-transparent"
-                      >
-                        Created
-                        {getSortIcon('created_at')}
-                      </Button>
-                    </TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    {visibleColumns.fileTitle && (
+                      <TableHead>
+                        <Button
+                          variant="ghost"
+                          onClick={() => handleSort('file_title')}
+                          className="h-8 p-0 hover:bg-transparent"
+                        >
+                          File Title
+                          {getSortIcon('file_title')}
+                        </Button>
+                      </TableHead>
+                    )}
+                    {visibleColumns.status && (
+                      <TableHead>
+                        <Button
+                          variant="ghost"
+                          onClick={() => handleSort('status')}
+                          className="h-8 p-0 hover:bg-transparent"
+                        >
+                          Status
+                          {getSortIcon('status')}
+                        </Button>
+                      </TableHead>
+                    )}
+                    {visibleColumns.created && (
+                      <TableHead>
+                        <Button
+                          variant="ghost"
+                          onClick={() => handleSort('created_at')}
+                          className="h-8 p-0 hover:bg-transparent"
+                        >
+                          Created
+                          {getSortIcon('created_at')}
+                        </Button>
+                      </TableHead>
+                    )}
+                    {visibleColumns.actions && (
+                      <TableHead className="text-right">Actions</TableHead>
+                    )}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {isLoading ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={getColSpan()} className="text-center py-8 text-muted-foreground">
                         Loading transcription history...
                       </TableCell>
                     </TableRow>
                   ) : filteredLogs.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={getColSpan()} className="text-center py-8 text-muted-foreground">
                         No transcriptions found
                       </TableCell>
                     </TableRow>
                   ) : paginatedLogs.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={getColSpan()} className="text-center py-8 text-muted-foreground">
                         No transcriptions on this page
                       </TableCell>
                     </TableRow>
@@ -1045,10 +1154,17 @@ export default function TranscriptionHistory() {
                             disabled={!log.transcription_text}
                           />
                         </TableCell>
-                        <TableCell className="font-medium">{log.file_title}</TableCell>
-                        <TableCell>{getStatusBadge(log.status)}</TableCell>
-                        <TableCell>{formatDate(log.created_at)}</TableCell>
-                        <TableCell className="text-right">
+                        {visibleColumns.fileTitle && (
+                          <TableCell className="font-medium">{log.file_title}</TableCell>
+                        )}
+                        {visibleColumns.status && (
+                          <TableCell>{getStatusBadge(log.status)}</TableCell>
+                        )}
+                        {visibleColumns.created && (
+                          <TableCell>{formatDate(log.created_at)}</TableCell>
+                        )}
+                        {visibleColumns.actions && (
+                          <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
                             <Button
                               variant="ghost"
@@ -1079,6 +1195,7 @@ export default function TranscriptionHistory() {
                             </Button>
                           </div>
                         </TableCell>
+                        )}
                       </TableRow>
                     ))
                   )}
