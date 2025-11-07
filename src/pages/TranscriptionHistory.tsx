@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw } from "lucide-react";
+import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import {
@@ -338,6 +338,52 @@ export default function TranscriptionHistory() {
     setSelectedStatuses(newStatuses);
   };
 
+  const handleExportCSV = () => {
+    try {
+      // Define CSV headers
+      const headers = [
+        'File Title',
+        'Status',
+        'Created Date',
+        'Log Time',
+        'Has Transcription',
+        'Transcription Length',
+        'Error Message'
+      ];
+
+      // Convert logs to CSV rows
+      const rows = filteredLogs.map(log => [
+        `"${log.file_title.replace(/"/g, '""')}"`, // Escape quotes in title
+        log.status,
+        format(new Date(log.created_at), "dd/MM/yyyy HH:mm:ss"),
+        format(new Date(log.log_time), "dd/MM/yyyy HH:mm:ss"),
+        log.transcription_text ? 'Yes' : 'No',
+        log.transcription_text ? log.transcription_text.length : 0,
+        log.error_message ? `"${log.error_message.replace(/"/g, '""')}"` : ''
+      ]);
+
+      // Combine headers and rows
+      const csvContent = [
+        headers.join(','),
+        ...rows.map(row => row.join(','))
+      ].join('\n');
+
+      // Create blob and download
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `transcription_history_${new Date().toISOString().split('T')[0]}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+
+      toast.success(`Exported ${filteredLogs.length} transcription(s) to CSV`);
+    } catch (error) {
+      console.error('Error exporting to CSV:', error);
+      toast.error('Failed to export CSV');
+    }
+  };
+
   const handleSort = (field: SortField) => {
     if (sortField === field) {
       // Cycle through: asc -> desc -> null
@@ -560,6 +606,15 @@ export default function TranscriptionHistory() {
                     Updated: {format(lastUpdated, "HH:mm:ss")}
                   </span>
                 )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportCSV}
+                  disabled={filteredLogs.length === 0}
+                >
+                  <FileSpreadsheet className="h-4 w-4 mr-2" />
+                  Export CSV
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
