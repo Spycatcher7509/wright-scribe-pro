@@ -41,6 +41,46 @@ export default function TranscriptionHistory() {
   useEffect(() => {
     checkAuth();
     fetchLogs();
+
+    // Set up realtime subscription
+    const channel = supabase
+      .channel('transcription-logs-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'transcription_logs'
+        },
+        (payload) => {
+          console.log('Realtime update:', payload);
+          
+          if (payload.eventType === 'INSERT') {
+            setLogs(prev => [payload.new as TranscriptionLog, ...prev]);
+            toast.success('New transcription added');
+          } else if (payload.eventType === 'UPDATE') {
+            setLogs(prev => prev.map(log => 
+              log.id === payload.new.id ? payload.new as TranscriptionLog : log
+            ));
+            
+            // Show toast for status changes
+            const newLog = payload.new as TranscriptionLog;
+            if (newLog.status === 'completed') {
+              toast.success(`Transcription completed: ${newLog.file_title}`);
+            } else if (newLog.status === 'failed') {
+              toast.error(`Transcription failed: ${newLog.file_title}`);
+            }
+          } else if (payload.eventType === 'DELETE') {
+            setLogs(prev => prev.filter(log => log.id !== payload.old.id));
+            toast.info('Transcription deleted');
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   useEffect(() => {
