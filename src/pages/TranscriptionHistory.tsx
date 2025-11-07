@@ -82,6 +82,8 @@ export default function TranscriptionHistory() {
   const [selectedStatuses, setSelectedStatuses] = useState<Set<string>>(new Set(['completed', 'processing', 'failed']));
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [newlyUpdatedIds, setNewlyUpdatedIds] = useState<Set<string>>(new Set());
+
 
   useEffect(() => {
     checkAuth();
@@ -101,19 +103,41 @@ export default function TranscriptionHistory() {
           console.log('Realtime update:', payload);
           
           if (payload.eventType === 'INSERT') {
-            setLogs(prev => [payload.new as TranscriptionLog, ...prev]);
+            const newLog = payload.new as TranscriptionLog;
+            setLogs(prev => [newLog, ...prev]);
+            
+            // Mark as newly updated and show animation
+            setNewlyUpdatedIds(prev => new Set(prev).add(newLog.id));
+            setTimeout(() => {
+              setNewlyUpdatedIds(prev => {
+                const updated = new Set(prev);
+                updated.delete(newLog.id);
+                return updated;
+              });
+            }, 3000); // Remove animation after 3 seconds
+            
             toast.success('New transcription added');
           } else if (payload.eventType === 'UPDATE') {
+            const updatedLog = payload.new as TranscriptionLog;
             setLogs(prev => prev.map(log => 
-              log.id === payload.new.id ? payload.new as TranscriptionLog : log
+              log.id === updatedLog.id ? updatedLog : log
             ));
             
+            // Mark as newly updated and show animation
+            setNewlyUpdatedIds(prev => new Set(prev).add(updatedLog.id));
+            setTimeout(() => {
+              setNewlyUpdatedIds(prev => {
+                const updated = new Set(prev);
+                updated.delete(updatedLog.id);
+                return updated;
+              });
+            }, 3000); // Remove animation after 3 seconds
+            
             // Show toast for status changes
-            const newLog = payload.new as TranscriptionLog;
-            if (newLog.status === 'completed') {
-              toast.success(`Transcription completed: ${newLog.file_title}`);
-            } else if (newLog.status === 'failed') {
-              toast.error(`Transcription failed: ${newLog.file_title}`);
+            if (updatedLog.status === 'completed') {
+              toast.success(`Transcription completed: ${updatedLog.file_title}`);
+            } else if (updatedLog.status === 'failed') {
+              toast.error(`Transcription failed: ${updatedLog.file_title}`);
             }
           } else if (payload.eventType === 'DELETE') {
             setLogs(prev => prev.filter(log => log.id !== payload.old.id));
@@ -831,7 +855,10 @@ export default function TranscriptionHistory() {
                     </TableRow>
                   ) : (
                     paginatedLogs.map((log) => (
-                      <TableRow key={log.id}>
+                      <TableRow 
+                        key={log.id}
+                        className={newlyUpdatedIds.has(log.id) ? 'animate-pulse bg-primary/5' : ''}
+                      >
                         <TableCell>
                           <Checkbox 
                             checked={selectedIds.has(log.id)}
