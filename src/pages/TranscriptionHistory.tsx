@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive } from "lucide-react";
+import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import {
@@ -37,6 +37,9 @@ interface TranscriptionLog {
   transcription_text?: string;
 }
 
+type SortField = 'file_title' | 'status' | 'created_at';
+type SortDirection = 'asc' | 'desc' | null;
+
 export default function TranscriptionHistory() {
   const navigate = useNavigate();
   const [logs, setLogs] = useState<TranscriptionLog[]>([]);
@@ -50,6 +53,8 @@ export default function TranscriptionHistory() {
   const [pageSize, setPageSize] = useState(10);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isExporting, setIsExporting] = useState(false);
+  const [sortField, setSortField] = useState<SortField | null>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>(null);
 
   useEffect(() => {
     checkAuth();
@@ -98,8 +103,8 @@ export default function TranscriptionHistory() {
 
   useEffect(() => {
     filterLogs();
-    setCurrentPage(1); // Reset to first page when filters change
-  }, [searchQuery, startDate, endDate, logs]);
+    setCurrentPage(1); // Reset to first page when filters or sort changes
+  }, [searchQuery, startDate, endDate, logs, sortField, sortDirection]);
 
   const checkAuth = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -147,6 +152,28 @@ export default function TranscriptionHistory() {
       filtered = filtered.filter((log) => {
         const logDate = new Date(log.created_at);
         return logDate <= new Date(endDate);
+      });
+    }
+
+    // Apply sorting
+    if (sortField && sortDirection) {
+      filtered.sort((a, b) => {
+        let aValue: string | number = a[sortField];
+        let bValue: string | number = b[sortField];
+
+        // Convert to lowercase for string comparison
+        if (typeof aValue === 'string') aValue = aValue.toLowerCase();
+        if (typeof bValue === 'string') bValue = bValue.toLowerCase();
+
+        // For dates, convert to timestamps
+        if (sortField === 'created_at') {
+          aValue = new Date(a[sortField]).getTime();
+          bValue = new Date(b[sortField]).getTime();
+        }
+
+        if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
+        if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
+        return 0;
       });
     }
 
@@ -253,7 +280,39 @@ export default function TranscriptionHistory() {
     setStartDate("");
     setEndDate("");
     setCurrentPage(1);
+    setSortField(null);
+    setSortDirection(null);
   };
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      // Cycle through: asc -> desc -> null
+      if (sortDirection === 'asc') {
+        setSortDirection('desc');
+      } else if (sortDirection === 'desc') {
+        setSortDirection(null);
+        setSortField(null);
+      }
+    } else {
+      // New field, start with ascending
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  const getSortIcon = (field: SortField) => {
+    if (sortField !== field) {
+      return <ArrowUpDown className="ml-2 h-4 w-4 text-muted-foreground" />;
+    }
+    if (sortDirection === 'asc') {
+      return <ArrowUp className="ml-2 h-4 w-4" />;
+    }
+    if (sortDirection === 'desc') {
+      return <ArrowDown className="ml-2 h-4 w-4" />;
+    }
+    return <ArrowUpDown className="ml-2 h-4 w-4 text-muted-foreground" />;
+  };
+
 
   const handlePageSizeChange = (value: string) => {
     setPageSize(Number(value));
@@ -383,9 +442,36 @@ export default function TranscriptionHistory() {
                         onCheckedChange={handleSelectAll}
                       />
                     </TableHead>
-                    <TableHead>File Title</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Created</TableHead>
+                    <TableHead>
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleSort('file_title')}
+                        className="h-8 p-0 hover:bg-transparent"
+                      >
+                        File Title
+                        {getSortIcon('file_title')}
+                      </Button>
+                    </TableHead>
+                    <TableHead>
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleSort('status')}
+                        className="h-8 p-0 hover:bg-transparent"
+                      >
+                        Status
+                        {getSortIcon('status')}
+                      </Button>
+                    </TableHead>
+                    <TableHead>
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleSort('created_at')}
+                        className="h-8 p-0 hover:bg-transparent"
+                      >
+                        Created
+                        {getSortIcon('created_at')}
+                      </Button>
+                    </TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
