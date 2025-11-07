@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import JSZip from "jszip";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -8,9 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet, Columns3, HelpCircle, Keyboard } from "lucide-react";
+import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet, Columns3, HelpCircle, Keyboard, BarChart3, Clock, Calendar } from "lucide-react";
 import { toast } from "sonner";
-import { format } from "date-fns";
+import { format, parseISO, startOfDay, startOfHour, getHours, getDay } from "date-fns";
+import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import {
   Dialog,
   DialogContent,
@@ -140,6 +141,7 @@ export default function TranscriptionHistory() {
     }
   );
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
+  const [showAnalytics, setShowAnalytics] = useState(false);
 
   // Save filter preferences whenever they change
   useEffect(() => {
@@ -770,6 +772,81 @@ export default function TranscriptionHistory() {
     (logs.filter(log => log.transcription_text).length || 1);
   const avgWords = Math.round(avgTranscriptionLength / 5); // Rough estimate: 5 chars per word
 
+  // Analytics data calculations
+  const analyticsData = useMemo(() => {
+    // Success rate over time (last 30 days)
+    const dailyStats = logs.reduce((acc, log) => {
+      const day = format(parseISO(log.created_at), 'MMM dd');
+      if (!acc[day]) {
+        acc[day] = { date: day, completed: 0, failed: 0, total: 0 };
+      }
+      acc[day].total++;
+      if (log.status === 'completed') acc[day].completed++;
+      if (log.status === 'failed') acc[day].failed++;
+      return acc;
+    }, {} as Record<string, { date: string; completed: number; failed: number; total: number }>);
+
+    const successRateOverTime = Object.values(dailyStats).map(stat => ({
+      date: stat.date,
+      successRate: stat.total > 0 ? Math.round((stat.completed / stat.total) * 100) : 0,
+      completed: stat.completed,
+      failed: stat.failed,
+    })).slice(-30);
+
+    // Activity by hour of day
+    const hourlyActivity = Array.from({ length: 24 }, (_, hour) => ({
+      hour: `${hour}:00`,
+      count: 0,
+    }));
+    
+    logs.forEach(log => {
+      const hour = getHours(parseISO(log.created_at));
+      hourlyActivity[hour].count++;
+    });
+
+    // Activity by day of week
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const weeklyActivity = Array.from({ length: 7 }, (_, day) => ({
+      day: dayNames[day],
+      count: 0,
+    }));
+    
+    logs.forEach(log => {
+      const day = getDay(parseISO(log.created_at));
+      weeklyActivity[day].count++;
+    });
+
+    // File size distribution (using transcription length as proxy)
+    const sizeRanges = [
+      { range: '0-1k', min: 0, max: 1000, count: 0 },
+      { range: '1k-5k', min: 1000, max: 5000, count: 0 },
+      { range: '5k-10k', min: 5000, max: 10000, count: 0 },
+      { range: '10k-50k', min: 10000, max: 50000, count: 0 },
+      { range: '50k+', min: 50000, max: Infinity, count: 0 },
+    ];
+
+    logs.forEach(log => {
+      const length = log.transcription_text?.length || 0;
+      const range = sizeRanges.find(r => length >= r.min && length < r.max);
+      if (range) range.count++;
+    });
+
+    // Status distribution
+    const statusDistribution = [
+      { name: 'Completed', value: completedCount, color: '#22c55e' },
+      { name: 'Processing', value: processingCount, color: '#f59e0b' },
+      { name: 'Failed', value: failedCount, color: '#ef4444' },
+    ].filter(item => item.value > 0);
+
+    return {
+      successRateOverTime,
+      hourlyActivity,
+      weeklyActivity,
+      sizeRanges: sizeRanges.filter(r => r.count > 0),
+      statusDistribution,
+    };
+  }, [logs, completedCount, processingCount, failedCount]);
+
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card">
@@ -845,6 +922,146 @@ export default function TranscriptionHistory() {
           </Card>
         </div>
 
+        {/* Analytics Dashboard */}
+        {showAnalytics && (
+          <div className="mb-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-bold">Analytics Dashboard</h2>
+              <Button variant="outline" size="sm" onClick={() => setShowAnalytics(false)}>
+                Hide Analytics
+              </Button>
+            </div>
+
+            {/* Success Rate Over Time */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5" />
+                  Success Rate Over Time
+                </CardTitle>
+                <CardDescription>Daily transcription success rate (last 30 days)</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={analyticsData.successRateOverTime}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="date" />
+                    <YAxis domain={[0, 100]} />
+                    <Tooltip />
+                    <Legend />
+                    <Line 
+                      type="monotone" 
+                      dataKey="successRate" 
+                      stroke="hsl(var(--primary))" 
+                      strokeWidth={2}
+                      name="Success Rate (%)"
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              {/* Activity by Hour */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Clock className="h-5 w-5" />
+                    Activity by Hour
+                  </CardTitle>
+                  <CardDescription>Transcriptions created by time of day</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <BarChart data={analyticsData.hourlyActivity}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="hour" />
+                      <YAxis />
+                      <Tooltip />
+                      <Bar dataKey="count" fill="hsl(var(--primary))" name="Transcriptions" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+
+              {/* Activity by Day */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Calendar className="h-5 w-5" />
+                    Activity by Day
+                  </CardTitle>
+                  <CardDescription>Transcriptions created by day of week</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <BarChart data={analyticsData.weeklyActivity}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="day" />
+                      <YAxis />
+                      <Tooltip />
+                      <Bar dataKey="count" fill="hsl(var(--primary))" name="Transcriptions" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              {/* File Size Distribution */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <BarChart3 className="h-5 w-5" />
+                    Transcription Size Distribution
+                  </CardTitle>
+                  <CardDescription>Distribution by character count</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <BarChart data={analyticsData.sizeRanges}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="range" />
+                      <YAxis />
+                      <Tooltip />
+                      <Bar dataKey="count" fill="hsl(var(--primary))" name="Files" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+
+              {/* Status Distribution */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Status Distribution</CardTitle>
+                  <CardDescription>Breakdown by transcription status</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ResponsiveContainer width="100%" height={250}>
+                    <PieChart>
+                      <Pie
+                        data={analyticsData.statusDistribution}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                        outerRadius={80}
+                        fill="#8884d8"
+                        dataKey="value"
+                      >
+                        {analyticsData.statusDistribution.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        )}
+
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -862,6 +1079,14 @@ export default function TranscriptionHistory() {
                   title="Keyboard shortcuts"
                 >
                   <Keyboard className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowAnalytics(!showAnalytics)}
+                >
+                  <BarChart3 className="h-4 w-4 mr-2" />
+                  {showAnalytics ? 'Hide' : 'Show'} Analytics
                 </Button>
               </div>
               <div className="flex items-center gap-2">
