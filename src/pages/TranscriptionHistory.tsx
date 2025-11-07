@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp } from "lucide-react";
+import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import {
@@ -80,6 +80,8 @@ export default function TranscriptionHistory() {
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
   const [deleteLogId, setDeleteLogId] = useState<string | null>(null);
   const [selectedStatuses, setSelectedStatuses] = useState<Set<string>>(new Set(['completed', 'processing', 'failed']));
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
     checkAuth();
@@ -152,8 +154,16 @@ export default function TranscriptionHistory() {
     } else {
       setLogs(data || []);
       setFilteredLogs(data || []);
+      setLastUpdated(new Date());
     }
     setIsLoading(false);
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchLogs();
+    setTimeout(() => setIsRefreshing(false), 500); // Keep animation for a bit
+    toast.success("Transcription history refreshed");
   };
 
   const filterLogs = () => {
@@ -532,15 +542,35 @@ export default function TranscriptionHistory() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Transcription History</CardTitle>
-            <CardDescription>
-              View all your past transcriptions with search and filtering
-              <span className="block mt-1 text-xs">
-                <kbd className="px-2 py-1 text-xs font-semibold text-muted-foreground bg-muted border border-border rounded">Ctrl/Cmd+A</kbd> Select all • 
-                <kbd className="px-2 py-1 text-xs font-semibold text-muted-foreground bg-muted border border-border rounded ml-1">Delete</kbd> Export selected • 
-                <kbd className="px-2 py-1 text-xs font-semibold text-muted-foreground bg-muted border border-border rounded ml-1">Esc</kbd> Clear filters
-              </span>
-            </CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Transcription History</CardTitle>
+                <CardDescription>
+                  View all your past transcriptions with search and filtering
+                  <span className="block mt-1 text-xs">
+                    <kbd className="px-2 py-1 text-xs font-semibold text-muted-foreground bg-muted border border-border rounded">Ctrl/Cmd+A</kbd> Select all • 
+                    <kbd className="px-2 py-1 text-xs font-semibold text-muted-foreground bg-muted border border-border rounded ml-1">Delete</kbd> Export selected • 
+                    <kbd className="px-2 py-1 text-xs font-semibold text-muted-foreground bg-muted border border-border rounded ml-1">Esc</kbd> Clear filters
+                  </span>
+                </CardDescription>
+              </div>
+              <div className="flex items-center gap-2">
+                {lastUpdated && (
+                  <span className="text-xs text-muted-foreground">
+                    Updated: {format(lastUpdated, "HH:mm:ss")}
+                  </span>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRefresh}
+                  disabled={isRefreshing}
+                >
+                  <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
+                  Refresh
+                </Button>
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="space-y-6">
             {/* Filters */}
