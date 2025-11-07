@@ -25,6 +25,7 @@ interface TranscriptionLog {
   created_at: string;
   error_message?: string;
   log_time: string;
+  transcription_text?: string;
 }
 
 export default function TranscriptionHistory() {
@@ -119,6 +120,22 @@ export default function TranscriptionHistory() {
     setSearchQuery("");
     setStartDate("");
     setEndDate("");
+  };
+
+  const handleDownloadTranscription = (log: TranscriptionLog) => {
+    if (!log.transcription_text) {
+      toast.error("No transcription text available");
+      return;
+    }
+
+    const blob = new Blob([log.transcription_text], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${log.file_title.replace(/[^a-z0-9]/gi, "_")}_transcription.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("Transcription downloaded!");
   };
 
   return (
@@ -219,13 +236,26 @@ export default function TranscriptionHistory() {
                         <TableCell>{getStatusBadge(log.status)}</TableCell>
                         <TableCell>{formatDate(log.created_at)}</TableCell>
                         <TableCell className="text-right">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setSelectedLog(log)}
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setSelectedLog(log)}
+                              title="View details"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            {log.transcription_text && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDownloadTranscription(log)}
+                                title="Download transcription"
+                              >
+                                <Download className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))
@@ -270,10 +300,49 @@ export default function TranscriptionHistory() {
                   <p className="text-sm mt-1 text-destructive">{selectedLog.error_message}</p>
                 </div>
               )}
+              {selectedLog.transcription_text && (
+                <div>
+                  <Label className="text-sm font-semibold">Transcription</Label>
+                  <div className="mt-2 p-4 bg-muted rounded-md max-h-96 overflow-y-auto">
+                    <p className="text-sm whitespace-pre-wrap">{selectedLog.transcription_text}</p>
+                  </div>
+                  <div className="mt-4 flex gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        navigator.clipboard.writeText(selectedLog.transcription_text!);
+                        toast.success("Copied to clipboard!");
+                      }}
+                    >
+                      Copy Text
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => handleDownloadTranscription(selectedLog)}
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+                      Download as TXT
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {!selectedLog.transcription_text && selectedLog.status === "completed" && (
+                <div>
+                  <p className="text-sm text-muted-foreground">
+                    Transcription text not available. Check your email for the complete transcription.
+                  </p>
+                </div>
+              )}
+              {selectedLog.status === "processing" && (
+                <div>
+                  <p className="text-sm text-muted-foreground">
+                    Transcription is still being processed. Please check back later.
+                  </p>
+                </div>
+              )}
               <div className="pt-4">
                 <p className="text-sm text-muted-foreground">
-                  Note: Full transcription text will be available via email notification.
-                  Check your inbox for the complete transcription.
+                  You will also receive the transcription via email notification.
                 </p>
               </div>
             </div>

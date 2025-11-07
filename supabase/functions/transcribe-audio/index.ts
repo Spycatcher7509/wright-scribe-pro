@@ -166,11 +166,12 @@ serve(async (req: Request) => {
     const result = await whisperResponse.json();
     console.log("Transcription successful");
 
-    // Update log with success
+    // Update log with success and transcription text
     await supabase
       .from("transcription_logs")
       .update({
         status: "completed",
+        transcription_text: result.text,
       })
       .eq("id", logEntry.id);
 
