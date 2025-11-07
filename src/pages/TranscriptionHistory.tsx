@@ -67,6 +67,7 @@ const FILTER_STORAGE_KEY = 'transcription_history_filters';
 
 interface FilterPreferences {
   searchQuery: string;
+  contentSearchQuery: string;
   startDate: string;
   endDate: string;
   selectedStatuses: string[];
@@ -104,6 +105,7 @@ export default function TranscriptionHistory() {
   const savedPrefs = loadFilterPreferences();
   
   const [searchQuery, setSearchQuery] = useState(savedPrefs.searchQuery || "");
+  const [contentSearchQuery, setContentSearchQuery] = useState(savedPrefs.contentSearchQuery || "");
   const [startDate, setStartDate] = useState(savedPrefs.startDate || "");
   const [endDate, setEndDate] = useState(savedPrefs.endDate || "");
   const [selectedLog, setSelectedLog] = useState<TranscriptionLog | null>(null);
@@ -126,6 +128,7 @@ export default function TranscriptionHistory() {
   useEffect(() => {
     const preferences: FilterPreferences = {
       searchQuery,
+      contentSearchQuery,
       startDate,
       endDate,
       selectedStatuses: Array.from(selectedStatuses),
@@ -134,7 +137,7 @@ export default function TranscriptionHistory() {
       sortDirection,
     };
     saveFilterPreferences(preferences);
-  }, [searchQuery, startDate, endDate, selectedStatuses, pageSize, sortField, sortDirection]);
+  }, [searchQuery, contentSearchQuery, startDate, endDate, selectedStatuses, pageSize, sortField, sortDirection]);
 
 
   useEffect(() => {
@@ -207,7 +210,7 @@ export default function TranscriptionHistory() {
   useEffect(() => {
     filterLogs();
     setCurrentPage(1); // Reset to first page when filters or sort changes
-  }, [searchQuery, startDate, endDate, logs, sortField, sortDirection, selectedStatuses]);
+  }, [searchQuery, contentSearchQuery, startDate, endDate, logs, sortField, sortDirection, selectedStatuses]);
 
 
   const checkAuth = async () => {
@@ -245,10 +248,17 @@ export default function TranscriptionHistory() {
   const filterLogs = () => {
     let filtered = [...logs];
 
-    // Search filter
+    // Search filter (file title)
     if (searchQuery) {
       filtered = filtered.filter((log) =>
         log.file_title.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+    }
+
+    // Content search filter (transcription text)
+    if (contentSearchQuery) {
+      filtered = filtered.filter((log) =>
+        log.transcription_text?.toLowerCase().includes(contentSearchQuery.toLowerCase())
       );
     }
 
@@ -396,6 +406,7 @@ export default function TranscriptionHistory() {
 
   const handleClearFilters = () => {
     setSearchQuery("");
+    setContentSearchQuery("");
     setStartDate("");
     setEndDate("");
     setCurrentPage(1);
@@ -642,7 +653,7 @@ export default function TranscriptionHistory() {
       // Escape: Clear filters and selections
       if (e.key === 'Escape') {
         e.preventDefault();
-        if (selectedIds.size > 0 || searchQuery || startDate || endDate || 
+        if (selectedIds.size > 0 || searchQuery || contentSearchQuery || startDate || endDate || 
             sortField || selectedStatuses.size !== 3) {
           handleClearFilters();
           setSelectedIds(new Set());
@@ -653,7 +664,27 @@ export default function TranscriptionHistory() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [paginatedLogs, selectedIds, searchQuery, startDate, endDate, sortField, selectedStatuses]);
+  }, [paginatedLogs, selectedIds, searchQuery, contentSearchQuery, startDate, endDate, sortField, selectedStatuses]);
+
+  // Helper function to highlight matching text
+  const highlightText = (text: string, query: string) => {
+    if (!query || !text) return text;
+    
+    const parts = text.split(new RegExp(`(${query})`, 'gi'));
+    return (
+      <>
+        {parts.map((part, index) => 
+          part.toLowerCase() === query.toLowerCase() ? (
+            <mark key={index} className="bg-primary/30 text-primary-foreground font-semibold rounded px-0.5">
+              {part}
+            </mark>
+          ) : (
+            part
+          )
+        )}
+      </>
+    );
+  };
 
   // Calculate statistics
   const totalTranscriptions = logs.length;
@@ -797,6 +828,20 @@ export default function TranscriptionHistory() {
                     placeholder="Search transcriptions..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="contentSearch">Search content</Label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="contentSearch"
+                    placeholder="Search in transcriptions..."
+                    value={contentSearchQuery}
+                    onChange={(e) => setContentSearchQuery(e.target.value)}
                     className="pl-10"
                   />
                 </div>
@@ -1176,9 +1221,21 @@ export default function TranscriptionHistory() {
               )}
               {selectedLog.transcription_text && (
                 <div>
-                  <Label className="text-sm font-semibold">Transcription</Label>
+                  <Label className="text-sm font-semibold">
+                    Transcription
+                    {contentSearchQuery && (
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        (highlighted matches)
+                      </span>
+                    )}
+                  </Label>
                   <div className="mt-2 p-4 bg-muted rounded-md max-h-96 overflow-y-auto">
-                    <p className="text-sm whitespace-pre-wrap">{selectedLog.transcription_text}</p>
+                    <p className="text-sm whitespace-pre-wrap">
+                      {contentSearchQuery 
+                        ? highlightText(selectedLog.transcription_text, contentSearchQuery)
+                        : selectedLog.transcription_text
+                      }
+                    </p>
                   </div>
                   <div className="mt-4 flex gap-2">
                     <Button
