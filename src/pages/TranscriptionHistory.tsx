@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2 } from "lucide-react";
+import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import {
@@ -371,6 +371,19 @@ export default function TranscriptionHistory() {
   const goToPreviousPage = () => setCurrentPage(prev => Math.max(1, prev - 1));
   const goToNextPage = () => setCurrentPage(prev => Math.min(totalPages, prev + 1));
 
+  // Calculate statistics
+  const totalTranscriptions = logs.length;
+  const completedCount = logs.filter(log => log.status === 'completed').length;
+  const failedCount = logs.filter(log => log.status === 'failed').length;
+  const processingCount = logs.filter(log => log.status === 'processing').length;
+  const successRate = totalTranscriptions > 0 
+    ? ((completedCount / totalTranscriptions) * 100).toFixed(1) 
+    : '0';
+  const avgTranscriptionLength = logs
+    .filter(log => log.transcription_text)
+    .reduce((acc, log) => acc + (log.transcription_text?.length || 0), 0) / 
+    (logs.filter(log => log.transcription_text).length || 1);
+  const avgWords = Math.round(avgTranscriptionLength / 5); // Rough estimate: 5 chars per word
 
   return (
     <div className="min-h-screen bg-background">
@@ -384,6 +397,69 @@ export default function TranscriptionHistory() {
       </header>
 
       <main className="container mx-auto px-4 py-8">
+        {/* Statistics Dashboard */}
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Total Transcriptions
+              </CardTitle>
+              <FileText className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{totalTranscriptions}</div>
+              <p className="text-xs text-muted-foreground">
+                All time
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Completed
+              </CardTitle>
+              <CheckCircle2 className="h-4 w-4 text-green-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{completedCount}</div>
+              <p className="text-xs text-muted-foreground">
+                {processingCount > 0 ? `${processingCount} processing` : 'All processed'}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Success Rate
+              </CardTitle>
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{successRate}%</div>
+              <p className="text-xs text-muted-foreground">
+                {failedCount > 0 ? `${failedCount} failed` : 'No failures'}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">
+                Avg. Transcription
+              </CardTitle>
+              <FileText className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{avgWords.toLocaleString()}</div>
+              <p className="text-xs text-muted-foreground">
+                words per file
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+
         <Card>
           <CardHeader>
             <CardTitle>Transcription History</CardTitle>
