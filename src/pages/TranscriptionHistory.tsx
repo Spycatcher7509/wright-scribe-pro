@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, Download, Eye, Filter } from "lucide-react";
+import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import {
@@ -16,6 +16,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 
 interface TranscriptionLog {
@@ -37,6 +44,8 @@ export default function TranscriptionHistory() {
   const [endDate, setEndDate] = useState("");
   const [selectedLog, setSelectedLog] = useState<TranscriptionLog | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   useEffect(() => {
     checkAuth();
@@ -85,6 +94,7 @@ export default function TranscriptionHistory() {
 
   useEffect(() => {
     filterLogs();
+    setCurrentPage(1); // Reset to first page when filters change
   }, [searchQuery, startDate, endDate, logs]);
 
   const checkAuth = async () => {
@@ -156,11 +166,6 @@ export default function TranscriptionHistory() {
     }
   };
 
-  const handleClearFilters = () => {
-    setSearchQuery("");
-    setStartDate("");
-    setEndDate("");
-  };
 
   const handleDownloadTranscription = (log: TranscriptionLog) => {
     if (!log.transcription_text) {
@@ -177,6 +182,29 @@ export default function TranscriptionHistory() {
     URL.revokeObjectURL(url);
     toast.success("Transcription downloaded!");
   };
+
+  const handleClearFilters = () => {
+    setSearchQuery("");
+    setStartDate("");
+    setEndDate("");
+    setCurrentPage(1);
+  };
+
+  const handlePageSizeChange = (value: string) => {
+    setPageSize(Number(value));
+    setCurrentPage(1);
+  };
+
+  // Calculate pagination
+  const totalPages = Math.ceil(filteredLogs.length / pageSize);
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = startIndex + pageSize;
+  const paginatedLogs = filteredLogs.slice(startIndex, endIndex);
+
+  const goToFirstPage = () => setCurrentPage(1);
+  const goToLastPage = () => setCurrentPage(totalPages);
+  const goToPreviousPage = () => setCurrentPage(prev => Math.max(1, prev - 1));
+  const goToNextPage = () => setCurrentPage(prev => Math.min(totalPages, prev + 1));
 
   return (
     <div className="min-h-screen bg-background">
@@ -235,14 +263,33 @@ export default function TranscriptionHistory() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={handleClearFilters}>
-                <Filter className="mr-2 h-4 w-4" />
-                Clear Filters
-              </Button>
-              <span className="text-sm text-muted-foreground">
-                Showing {filteredLogs.length} of {logs.length} transcriptions
-              </span>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <Button variant="outline" size="sm" onClick={handleClearFilters}>
+                  <Filter className="mr-2 h-4 w-4" />
+                  Clear Filters
+                </Button>
+                <span className="text-sm text-muted-foreground">
+                  Showing {startIndex + 1}-{Math.min(endIndex, filteredLogs.length)} of {filteredLogs.length} transcriptions
+                </span>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <Label htmlFor="page-size" className="text-sm text-muted-foreground">
+                  Per page:
+                </Label>
+                <Select value={pageSize.toString()} onValueChange={handlePageSizeChange}>
+                  <SelectTrigger id="page-size" className="w-[100px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10">10</SelectItem>
+                    <SelectItem value="25">25</SelectItem>
+                    <SelectItem value="50">50</SelectItem>
+                    <SelectItem value="100">100</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             {/* Table */}
@@ -269,8 +316,14 @@ export default function TranscriptionHistory() {
                         No transcriptions found
                       </TableCell>
                     </TableRow>
+                  ) : paginatedLogs.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                        No transcriptions on this page
+                      </TableCell>
+                    </TableRow>
                   ) : (
-                    filteredLogs.map((log) => (
+                    paginatedLogs.map((log) => (
                       <TableRow key={log.id}>
                         <TableCell className="font-medium">{log.file_title}</TableCell>
                         <TableCell>{getStatusBadge(log.status)}</TableCell>
@@ -303,6 +356,49 @@ export default function TranscriptionHistory() {
                 </TableBody>
               </Table>
             </div>
+
+            {/* Pagination Controls */}
+            {filteredLogs.length > 0 && (
+              <div className="flex items-center justify-between pt-4">
+                <div className="text-sm text-muted-foreground">
+                  Page {currentPage} of {totalPages}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={goToFirstPage}
+                    disabled={currentPage === 1}
+                  >
+                    <ChevronsLeft className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={goToPreviousPage}
+                    disabled={currentPage === 1}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={goToNextPage}
+                    disabled={currentPage === totalPages}
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={goToLastPage}
+                    disabled={currentPage === totalPages}
+                  >
+                    <ChevronsRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       </main>
