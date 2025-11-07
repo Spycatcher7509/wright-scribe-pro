@@ -2,3 +2,6 @@ project_id = "okspcuzngoublrmtjreh"
 
 [functions.create-default-users]
 verify_jwt = false
+
+[functions.reset-user-password]
+verify_jwt = true
