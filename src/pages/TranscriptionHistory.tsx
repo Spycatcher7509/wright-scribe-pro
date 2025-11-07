@@ -468,6 +468,88 @@ export default function TranscriptionHistory() {
     }
   };
 
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) {
+      toast.error("No transcriptions selected");
+      return;
+    }
+
+    try {
+      const idsToDelete = Array.from(selectedIds);
+      const { error } = await supabase
+        .from("transcription_logs")
+        .delete()
+        .in("id", idsToDelete);
+
+      if (error) {
+        throw error;
+      }
+
+      toast.success(`Deleted ${selectedIds.size} transcription(s)`);
+      
+      // Remove from local state
+      setLogs(prev => prev.filter(log => !selectedIds.has(log.id)));
+      setSelectedIds(new Set());
+    } catch (error) {
+      console.error("Error deleting transcriptions:", error);
+      toast.error("Failed to delete transcriptions");
+    }
+  };
+
+  const handleBulkExportCSV = () => {
+    if (selectedIds.size === 0) {
+      toast.error("No transcriptions selected");
+      return;
+    }
+
+    try {
+      const selectedLogs = logs.filter(log => selectedIds.has(log.id));
+      
+      // Define CSV headers
+      const headers = [
+        'File Title',
+        'Status',
+        'Created Date',
+        'Log Time',
+        'Has Transcription',
+        'Transcription Length',
+        'Error Message'
+      ];
+
+      // Convert selected logs to CSV rows
+      const rows = selectedLogs.map(log => [
+        `"${log.file_title.replace(/"/g, '""')}"`,
+        log.status,
+        format(new Date(log.created_at), "dd/MM/yyyy HH:mm:ss"),
+        format(new Date(log.log_time), "dd/MM/yyyy HH:mm:ss"),
+        log.transcription_text ? 'Yes' : 'No',
+        log.transcription_text ? log.transcription_text.length : 0,
+        log.error_message ? `"${log.error_message.replace(/"/g, '""')}"` : ''
+      ]);
+
+      // Combine headers and rows
+      const csvContent = [
+        headers.join(','),
+        ...rows.map(row => row.join(','))
+      ].join('\n');
+
+      // Create blob and download
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `selected_transcriptions_${new Date().toISOString().split('T')[0]}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+
+      toast.success(`Exported ${selectedIds.size} transcription(s) to CSV`);
+      setSelectedIds(new Set());
+    } catch (error) {
+      console.error('Error exporting to CSV:', error);
+      toast.error('Failed to export CSV');
+    }
+  };
+
   const handlePageSizeChange = (value: string) => {
     setPageSize(Number(value));
     setCurrentPage(1);
@@ -951,6 +1033,60 @@ export default function TranscriptionHistory() {
             )}
           </CardContent>
         </Card>
+
+        {/* Floating Action Toolbar */}
+        <div
+          className={`fixed bottom-0 left-0 right-0 bg-card border-t shadow-lg transition-all duration-300 ease-out ${
+            selectedIds.size > 0
+              ? 'translate-y-0 opacity-100'
+              : 'translate-y-full opacity-0 pointer-events-none'
+          }`}
+        >
+          <div className="container mx-auto px-6 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="h-5 w-5 text-primary" />
+                <span className="font-medium">
+                  {selectedIds.size} item{selectedIds.size !== 1 ? 's' : ''} selected
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSelectedIds(new Set())}
+                >
+                  Clear Selection
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleBulkExportCSV}
+                >
+                  <FileSpreadsheet className="h-4 w-4 mr-2" />
+                  Export CSV
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleBulkExport}
+                  disabled={isExporting}
+                >
+                  <FileArchive className="h-4 w-4 mr-2" />
+                  {isExporting ? 'Exporting...' : 'Export ZIP'}
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={handleBulkDelete}
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
       </main>
 
       {/* View Details Dialog */}
