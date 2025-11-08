@@ -1024,6 +1024,132 @@ export default function TranscriptionHistory() {
     }
   };
 
+  // Bulk tag operations
+  const handleBulkAddTag = async (tagId: string) => {
+    if (selectedIds.size === 0) {
+      toast.error("No transcriptions selected");
+      return;
+    }
+
+    try {
+      const selectedLogs = Array.from(selectedIds);
+      const transcriptionTags: { transcription_id: string; tag_id: string }[] = [];
+
+      // Create tag associations for each selected transcription
+      selectedLogs.forEach(logId => {
+        transcriptionTags.push({
+          transcription_id: logId,
+          tag_id: tagId,
+        });
+      });
+
+      // Insert all tags (using upsert to avoid duplicates)
+      const { error } = await supabase
+        .from("transcription_tags")
+        .upsert(transcriptionTags, { 
+          onConflict: 'transcription_id,tag_id',
+          ignoreDuplicates: true 
+        });
+
+      if (error) throw error;
+
+      const tag = tags.find(t => t.id === tagId);
+      toast.success(`Added tag "${tag?.name}" to ${selectedIds.size} transcription(s)`);
+      fetchLogs();
+    } catch (error) {
+      console.error("Error adding tags:", error);
+      toast.error("Failed to add tags");
+    }
+  };
+
+  const handleBulkRemoveTag = async (tagId: string) => {
+    if (selectedIds.size === 0) {
+      toast.error("No transcriptions selected");
+      return;
+    }
+
+    try {
+      const selectedLogs = Array.from(selectedIds);
+
+      const { error } = await supabase
+        .from("transcription_tags")
+        .delete()
+        .in('transcription_id', selectedLogs)
+        .eq('tag_id', tagId);
+
+      if (error) throw error;
+
+      const tag = tags.find(t => t.id === tagId);
+      toast.success(`Removed tag "${tag?.name}" from ${selectedIds.size} transcription(s)`);
+      fetchLogs();
+    } catch (error) {
+      console.error("Error removing tags:", error);
+      toast.error("Failed to remove tags");
+    }
+  };
+
+  const handleBulkApplyTemplate = async (template: TagTemplate) => {
+    if (selectedIds.size === 0) {
+      toast.error("No transcriptions selected");
+      return;
+    }
+
+    try {
+      const selectedLogs = Array.from(selectedIds);
+      const transcriptionTags: { transcription_id: string; tag_id: string }[] = [];
+
+      // Create tag associations for each selected transcription and each tag in template
+      selectedLogs.forEach(logId => {
+        template.tags.forEach(tag => {
+          transcriptionTags.push({
+            transcription_id: logId,
+            tag_id: tag.id,
+          });
+        });
+      });
+
+      // Insert all tags (using upsert to avoid duplicates)
+      const { error } = await supabase
+        .from("transcription_tags")
+        .upsert(transcriptionTags, { 
+          onConflict: 'transcription_id,tag_id',
+          ignoreDuplicates: true 
+        });
+
+      if (error) throw error;
+
+      toast.success(`Applied template "${template.name}" to ${selectedIds.size} transcription(s)`);
+      fetchLogs();
+    } catch (error) {
+      console.error("Error applying template:", error);
+      toast.error("Failed to apply template");
+    }
+  };
+
+  const handleBulkClearAllTags = async () => {
+    if (selectedIds.size === 0) {
+      toast.error("No transcriptions selected");
+      return;
+    }
+
+    try {
+      const selectedLogs = Array.from(selectedIds);
+
+      const { error } = await supabase
+        .from("transcription_tags")
+        .delete()
+        .in('transcription_id', selectedLogs);
+
+      if (error) throw error;
+
+      toast.success(`Cleared all tags from ${selectedIds.size} transcription(s)`);
+      fetchLogs();
+    } catch (error) {
+      console.error("Error clearing tags:", error);
+      toast.error("Failed to clear tags");
+    }
+  };
+
   // Tag management handlers
   const handleCreateTag = async () => {
     if (!newTagName.trim()) {
@@ -1278,65 +1404,6 @@ export default function TranscriptionHistory() {
 
   const closeAssignTagsDialog = () => {
     setAssignTagsToLog(null);
-  };
-
-  // Bulk tag operations
-  const handleBulkAddTag = async (tagId: string) => {
-    if (selectedIds.size === 0) {
-      toast.error("No transcriptions selected");
-      return;
-    }
-
-    try {
-      const insertData = Array.from(selectedIds).map(transcriptionId => ({
-        transcription_id: transcriptionId,
-        tag_id: tagId
-      }));
-
-      const { error } = await supabase
-        .from("transcription_tags")
-        .insert(insertData);
-
-      if (error) {
-        // Check if some were already assigned (unique constraint violation)
-        if (error.code === '23505') {
-          toast.warning("Tag added to available transcriptions (some already had this tag)");
-        } else {
-          throw error;
-        }
-      } else {
-        toast.success(`Tag added to ${selectedIds.size} transcription(s)`);
-      }
-      fetchLogs();
-    } catch (error) {
-      console.error("Error bulk adding tag:", error);
-      toast.error("Failed to add tag to transcriptions");
-    }
-  };
-
-  const handleBulkRemoveTag = async (tagId: string) => {
-    if (selectedIds.size === 0) {
-      toast.error("No transcriptions selected");
-      return;
-    }
-
-    try {
-      const { error } = await supabase
-        .from("transcription_tags")
-        .delete()
-        .in("transcription_id", Array.from(selectedIds))
-        .eq("tag_id", tagId);
-
-      if (error) {
-        throw error;
-      }
-
-      toast.success(`Tag removed from ${selectedIds.size} transcription(s)`);
-      fetchLogs();
-    } catch (error) {
-      console.error("Error bulk removing tag:", error);
-      toast.error("Failed to remove tag from transcriptions");
-    }
   };
 
   const handlePageSizeChange = (value: string) => {
@@ -2634,15 +2701,105 @@ export default function TranscriptionHistory() {
                 </Button>
 
                 {selectedIds.size > 0 && (
-                  <Button 
-                    variant="default" 
-                    size="sm" 
-                    onClick={handleBulkExport}
-                    disabled={isExporting}
-                  >
-                    <FileArchive className="mr-2 h-4 w-4" />
-                    {isExporting ? "Exporting..." : `Export Selected (${selectedIds.size})`}
-                  </Button>
+                  <>
+                    {/* Bulk Tag Actions */}
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" size="sm">
+                          <Tag className="mr-2 h-4 w-4" />
+                          Bulk Tag ({selectedIds.size})
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-80 bg-card border shadow-lg z-50" align="start">
+                        <div className="space-y-4">
+                          <div>
+                            <h4 className="font-medium text-sm mb-2">Add Tags to Selected</h4>
+                            <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                              {tags.map(tag => (
+                                <div
+                                  key={tag.id}
+                                  className="flex items-center gap-2 p-2 hover:bg-muted/50 rounded cursor-pointer"
+                                  onClick={() => handleBulkAddTag(tag.id)}
+                                >
+                                  <div
+                                    className="w-3 h-3 rounded"
+                                    style={{ backgroundColor: tag.color }}
+                                  />
+                                  <span className="text-sm flex-1">{tag.name}</span>
+                                  <Plus className="h-4 w-4 text-muted-foreground" />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="border-t pt-3">
+                            <h4 className="font-medium text-sm mb-2">Remove Tags from Selected</h4>
+                            <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                              {tags.map(tag => (
+                                <div
+                                  key={tag.id}
+                                  className="flex items-center gap-2 p-2 hover:bg-muted/50 rounded cursor-pointer"
+                                  onClick={() => handleBulkRemoveTag(tag.id)}
+                                >
+                                  <div
+                                    className="w-3 h-3 rounded"
+                                    style={{ backgroundColor: tag.color }}
+                                  />
+                                  <span className="text-sm flex-1">{tag.name}</span>
+                                  <X className="h-4 w-4 text-destructive" />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {tagTemplates.length > 0 && (
+                            <div className="border-t pt-3">
+                              <h4 className="font-medium text-sm mb-2">Apply Template</h4>
+                              <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                                {tagTemplates.map(template => (
+                                  <div
+                                    key={template.id}
+                                    className="flex items-center gap-2 p-2 hover:bg-muted/50 rounded cursor-pointer"
+                                    onClick={() => handleBulkApplyTemplate(template)}
+                                  >
+                                    <Tag className="h-4 w-4 text-muted-foreground" />
+                                    <div className="flex-1">
+                                      <div className="text-sm font-medium">{template.name}</div>
+                                      <div className="text-xs text-muted-foreground">
+                                        {template.tags.length} tag{template.tags.length !== 1 ? 's' : ''}
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="border-t pt-3">
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              className="w-full"
+                              onClick={handleBulkClearAllTags}
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Clear All Tags from Selected
+                            </Button>
+                          </div>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+
+                    <Button 
+                      variant="default" 
+                      size="sm" 
+                      onClick={handleBulkExport}
+                      disabled={isExporting}
+                    >
+                      <FileArchive className="mr-2 h-4 w-4" />
+                      {isExporting ? "Exporting..." : `Export Selected (${selectedIds.size})`}
+                    </Button>
+                  </>
                 )}
                 <span className="text-sm text-muted-foreground">
                   Showing {startIndex + 1}-{Math.min(endIndex, filteredLogs.length)} of {filteredLogs.length} transcriptions
