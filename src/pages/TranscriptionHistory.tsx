@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { format, parseISO, startOfDay, startOfHour, getHours, getDay, startOfWeek, startOfMonth, subDays, endOfDay } from "date-fns";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { diffWords } from 'diff';
+import TagUsageHeatmap from "@/components/TagUsageHeatmap";
 
 // Color palette themes for tags
 const COLOR_THEMES = {
@@ -1807,6 +1808,16 @@ export default function TranscriptionHistory() {
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+
+                  {/* Tag Usage Heatmap */}
+                  <Card className="lg:col-span-3">
+                    <CardContent className="p-0">
+                      <TagUsageHeatmap 
+                        logs={logs} 
+                        selectedTags={Array.from(selectedTagFilters)}
+                      />
                     </CardContent>
                   </Card>
 
