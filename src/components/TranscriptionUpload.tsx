@@ -45,6 +45,12 @@ export function TranscriptionUpload() {
     message?: string;
   }>({ checking: false, available: null });
   const [selectedLanguage, setSelectedLanguage] = useState<string>("en");
+  const [captionPreview, setCaptionPreview] = useState<{
+    isLoading: boolean;
+    text: string | null;
+    lines: string[];
+  }>({ isLoading: false, text: null, lines: [] });
+  const [showPreview, setShowPreview] = useState(false);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -294,6 +300,8 @@ export function TranscriptionUpload() {
   const handleYouTubeUrlChange = (url: string) => {
     setYoutubeUrl(url);
     setCaptionStatus({ checking: false, available: null });
+    setCaptionPreview({ isLoading: false, text: null, lines: [] });
+    setShowPreview(false);
     
     // Debounce the caption check
     if (url.trim()) {
@@ -304,62 +312,123 @@ export function TranscriptionUpload() {
     }
   };
 
+  const handleLoadPreview = async () => {
+    if (!youtubeUrl.trim()) {
+      toast.error("Please enter a YouTube URL");
+      return;
+    }
+
+    setCaptionPreview({ isLoading: true, text: null, lines: [] });
+    setShowPreview(true);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('transcribe-youtube', {
+        body: { 
+          youtubeUrl,
+          language: selectedLanguage,
+          previewOnly: true 
+        }
+      });
+
+      if (error) throw error;
+      if (data.error) throw new Error(data.error);
+
+      setCaptionPreview({
+        isLoading: false,
+        text: data.preview,
+        lines: data.lines
+      });
+
+      toast.success("Preview loaded successfully!");
+    } catch (error: any) {
+      console.error("Preview error:", error);
+      toast.error(error.message || "Failed to load preview");
+      setCaptionPreview({ isLoading: false, text: null, lines: [] });
+    }
+  };
+
   const handleYoutubeTranscribe = async () => {
     if (!youtubeUrl.trim()) {
       toast.error("Please enter a YouTube URL");
       return;
     }
 
+    const maxRetries = 3;
+    let attempt = 0;
+    let lastError: any = null;
+
     setIsProcessing(true);
     setProgress(0);
     setResult(null);
 
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        toast.error("You must be logged in to transcribe videos");
+    const tryTranscribe = async (retryAttempt: number): Promise<any> => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          throw new Error("You must be logged in to transcribe videos");
+        }
+
+        const progressInterval = setInterval(() => {
+          setProgress((prev) => Math.min(prev + 10, 90));
+        }, 500);
+
+        const { data, error } = await supabase.functions.invoke("transcribe-youtube", {
+          body: { 
+            youtubeUrl, 
+            downloadVideo,
+            language: selectedLanguage 
+          },
+        });
+
+        clearInterval(progressInterval);
+        setProgress(100);
+
+        if (error) throw error;
+        if (data.error) throw new Error(data.error);
+
+        return data;
+      } catch (error: any) {
+        if (retryAttempt < maxRetries) {
+          const backoffDelay = Math.pow(2, retryAttempt) * 1000; // 1s, 2s, 4s
+          toast.info(`Attempt ${retryAttempt + 1} failed. Retrying in ${backoffDelay / 1000}s...`, {
+            duration: backoffDelay,
+          });
+          
+          await new Promise(resolve => setTimeout(resolve, backoffDelay));
+          throw error; // Re-throw to trigger retry
+        } else {
+          throw error; // Max retries reached
+        }
+      }
+    };
+
+    while (attempt <= maxRetries) {
+      try {
+        const data = await tryTranscribe(attempt);
+        
+        setResult({
+          text: data.text,
+          duration: data.duration,
+          language: data.language,
+          logId: data.logId,
+          title: data.title,
+        });
+
+        toast.success("YouTube transcription completed successfully!");
+        setIsProcessing(false);
+        setProgress(0);
         return;
+      } catch (error: any) {
+        lastError = error;
+        attempt++;
       }
-
-      const progressInterval = setInterval(() => {
-        setProgress((prev) => Math.min(prev + 10, 90));
-      }, 500);
-
-      const { data, error } = await supabase.functions.invoke("transcribe-youtube", {
-        body: { 
-          youtubeUrl, 
-          downloadVideo,
-          language: selectedLanguage 
-        },
-      });
-
-      clearInterval(progressInterval);
-      setProgress(100);
-
-      if (error) {
-        throw error;
-      }
-
-      if (data.error) {
-        throw new Error(data.error);
-      }
-
-      setResult({
-        text: data.text,
-        duration: data.duration,
-        language: data.language,
-        logId: data.logId,
-        title: data.title,
-      });
-
-      toast.success("YouTube transcription completed successfully!");
-    } catch (error: any) {
-      console.error("YouTube transcription error:", error);
-      toast.error(error.message || "Failed to transcribe YouTube video");
-    } finally {
-      setIsProcessing(false);
-      setProgress(0);
     }
+
+    // All retries failed
+    console.error("YouTube transcription error:", lastError);
+    toast.error(lastError.message || "Failed to transcribe YouTube video after multiple attempts");
+    setIsProcessing(false);
+    setProgress(0);
   };
 
   const handleReset = () => {
@@ -373,6 +442,8 @@ export function TranscriptionUpload() {
     setMode('transcribe');
     setCaptionStatus({ checking: false, available: null });
     setSelectedLanguage("en");
+    setCaptionPreview({ isLoading: false, text: null, lines: [] });
+    setShowPreview(false);
   };
 
   const handleUseCachedResult = (log: any) => {
@@ -716,6 +787,47 @@ export function TranscriptionUpload() {
                   <p className="text-xs text-muted-foreground">
                     {captionStatus.languages.length} language{captionStatus.languages.length !== 1 ? 's' : ''} available for this video
                   </p>
+                </div>
+              )}
+
+              {/* Preview Button and Display */}
+              {captionStatus.available && !isProcessing && (
+                <div className="space-y-3">
+                  <Button
+                    variant="outline"
+                    onClick={handleLoadPreview}
+                    disabled={captionPreview.isLoading}
+                    className="w-full"
+                  >
+                    {captionPreview.isLoading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Loading preview...
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="mr-2 h-4 w-4" />
+                        Preview First Few Lines
+                      </>
+                    )}
+                  </Button>
+
+                  {showPreview && captionPreview.text && (
+                    <Alert className="border-blue-500 bg-blue-50 dark:bg-blue-950">
+                      <Subtitles className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                      <AlertDescription className="text-blue-700 dark:text-blue-300">
+                        <div className="space-y-2">
+                          <strong className="font-semibold">Caption Preview:</strong>
+                          <div className="mt-2 p-3 bg-background/50 rounded border border-border">
+                            <p className="text-sm whitespace-pre-wrap">{captionPreview.text}</p>
+                          </div>
+                          <p className="text-xs opacity-75 mt-2">
+                            Showing first {captionPreview.lines.length} caption lines
+                          </p>
+                        </div>
+                      </AlertDescription>
+                    </Alert>
+                  )}
                 </div>
               )}
 

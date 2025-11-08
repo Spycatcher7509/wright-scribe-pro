@@ -294,7 +294,7 @@ serve(async (req: Request) => {
       );
     }
 
-    const { youtubeUrl, language: requestedLanguage = 'en', checkOnly = false } = await req.json();
+    const { youtubeUrl, language: requestedLanguage = 'en', checkOnly = false, previewOnly = false } = await req.json();
 
     if (!youtubeUrl) {
       return new Response(
@@ -310,6 +310,97 @@ serve(async (req: Request) => {
         JSON.stringify({ error: "Invalid YouTube URL" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // If previewOnly mode, fetch and return first few caption lines
+    if (previewOnly) {
+      console.log(`Fetching caption preview for video: ${videoId}, language: ${requestedLanguage}`);
+      
+      try {
+        const videoPageResponse = await fetch(`https://www.youtube.com/watch?v=${videoId}`);
+        
+        if (!videoPageResponse.ok) {
+          return new Response(
+            JSON.stringify({ error: "Failed to fetch video page" }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        
+        const html = await videoPageResponse.text();
+        const captionTracksMatch = html.match(/"captionTracks":\s*(\[.*?\])/);
+        
+        if (!captionTracksMatch) {
+          return new Response(
+            JSON.stringify({ error: "No captions found" }),
+            { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        
+        const captionTracks = JSON.parse(captionTracksMatch[1]);
+        let track = captionTracks.find((t: any) => t.languageCode === requestedLanguage);
+        
+        if (!track && requestedLanguage !== 'en') {
+          track = captionTracks.find((t: any) => t.languageCode === 'en');
+        }
+        
+        if (!track) {
+          track = captionTracks[0];
+        }
+        
+        if (!track.baseUrl) {
+          return new Response(
+            JSON.stringify({ error: "No caption URL found" }),
+            { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        
+        const captionResponse = await fetch(track.baseUrl);
+        
+        if (!captionResponse.ok) {
+          return new Response(
+            JSON.stringify({ error: "Failed to fetch captions" }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        
+        const captionXml = await captionResponse.text();
+        const textMatches = captionXml.matchAll(/<text[^>]*>(.*?)<\/text>/g);
+        const texts: string[] = [];
+        
+        let count = 0;
+        for (const match of textMatches) {
+          if (count >= 5) break; // Get first 5 lines
+          
+          const text = match[1]
+            .replace(/&amp;/g, "&")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'")
+            .replace(/<[^>]+>/g, "")
+            .trim();
+          
+          if (text) {
+            texts.push(text);
+            count++;
+          }
+        }
+        
+        return new Response(
+          JSON.stringify({ 
+            preview: texts.join(" "),
+            lines: texts,
+            language: track.languageCode 
+          }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      } catch (error: any) {
+        console.error("Error fetching preview:", error);
+        return new Response(
+          JSON.stringify({ error: error.message }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // If checkOnly mode, just return available caption languages
