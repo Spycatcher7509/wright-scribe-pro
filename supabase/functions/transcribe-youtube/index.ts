@@ -84,8 +84,8 @@ function extractVideoId(url: string): string | null {
 }
 
 // Strategy 1: Get transcript directly from YouTube (fastest, most reliable)
-async function getYouTubeTranscript(videoId: string): Promise<string | null> {
-  console.log("Attempting to fetch YouTube transcript/captions...");
+async function getYouTubeTranscript(videoId: string, language: string = 'en'): Promise<string | null> {
+  console.log(`Attempting to fetch YouTube transcript/captions in language: ${language}...`);
   
   try {
     // Fetch video page to extract transcript data
@@ -113,8 +113,20 @@ async function getYouTubeTranscript(videoId: string): Promise<string | null> {
       return null;
     }
     
-    // Prefer English captions, or use first available
-    const track = captionTracks.find((t: any) => t.languageCode === "en") || captionTracks[0];
+    // Try to find the requested language, otherwise fall back to English, then first available
+    let track = captionTracks.find((t: any) => t.languageCode === language);
+    
+    if (!track && language !== 'en') {
+      console.log(`Language ${language} not found, trying English...`);
+      track = captionTracks.find((t: any) => t.languageCode === 'en');
+    }
+    
+    if (!track) {
+      console.log("Requested languages not found, using first available");
+      track = captionTracks[0];
+    }
+    
+    console.log(`Using caption track: ${track.languageCode || 'unknown'}`);
     
     if (!track.baseUrl) {
       console.log("No baseUrl found in caption track");
@@ -167,11 +179,11 @@ async function getYouTubeTranscript(videoId: string): Promise<string | null> {
 }
 
 // Strategy 2: Use third-party transcript API
-async function getTranscriptViaAPI(videoId: string): Promise<string | null> {
-  console.log("Attempting to fetch transcript via API...");
+async function getTranscriptViaAPI(videoId: string, language: string = 'en'): Promise<string | null> {
+  console.log(`Attempting to fetch transcript via API in language: ${language}...`);
   
   try {
-    const response = await fetch(`https://www.youtube.com/api/timedtext?v=${videoId}&lang=en`);
+    const response = await fetch(`https://www.youtube.com/api/timedtext?v=${videoId}&lang=${language}`);
     
     if (!response.ok) {
       console.log("Transcript API request failed");
@@ -220,7 +232,7 @@ async function getTranscriptViaAPI(videoId: string): Promise<string | null> {
 }
 
 // Main function to get transcript or audio
-async function getYouTubeContent(videoId: string): Promise<{ text?: string; audioBlob?: Blob; title: string; method: string }> {
+async function getYouTubeContent(videoId: string, language: string = 'en'): Promise<{ text?: string; audioBlob?: Blob; title: string; method: string; language?: string }> {
   // Get video title from YouTube oEmbed API
   const videoInfoResponse = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
   let title = `YouTube Video ${videoId}`;
@@ -230,22 +242,22 @@ async function getYouTubeContent(videoId: string): Promise<{ text?: string; audi
     title = videoInfo.title || title;
   }
 
-  console.log(`Processing video: ${title}`);
+  console.log(`Processing video: ${title}, language: ${language}`);
 
   // Try to get transcript first (much faster and cheaper)
-  let transcript = await getYouTubeTranscript(videoId);
+  let transcript = await getYouTubeTranscript(videoId, language);
   
   if (transcript) {
     console.log("Using direct YouTube transcript");
-    return { text: transcript, title, method: "youtube_captions" };
+    return { text: transcript, title, method: "youtube_captions", language };
   }
 
   // Try alternative transcript API
-  transcript = await getTranscriptViaAPI(videoId);
+  transcript = await getTranscriptViaAPI(videoId, language);
   
   if (transcript) {
     console.log("Using transcript API");
-    return { text: transcript, title, method: "transcript_api" };
+    return { text: transcript, title, method: "transcript_api", language };
   }
 
   // If no transcript available, fall back to audio transcription
@@ -282,7 +294,7 @@ serve(async (req: Request) => {
       );
     }
 
-    const { youtubeUrl } = await req.json();
+    const { youtubeUrl, language: requestedLanguage = 'en' } = await req.json();
 
     if (!youtubeUrl) {
       return new Response(
@@ -300,10 +312,10 @@ serve(async (req: Request) => {
       );
     }
 
-    console.log(`Processing YouTube transcription for user ${user.id}, video: ${videoId}`);
+    console.log(`Processing YouTube transcription for user ${user.id}, video: ${videoId}, language: ${requestedLanguage}`);
 
     // Get transcript or audio
-    const content = await getYouTubeContent(videoId);
+    const content = await getYouTubeContent(videoId, requestedLanguage);
 
     // Create transcription log entry
     const { data: logEntry, error: logError } = await supabase
@@ -332,7 +344,7 @@ serve(async (req: Request) => {
     if (content.text) {
       console.log("Using captions directly, no Whisper needed");
       transcriptionText = content.text;
-      language = "en"; // Assuming English for now
+      language = content.language || requestedLanguage; // Use detected language from captions
     } else if (content.audioBlob) {
       // Fallback: transcribe audio with Whisper
       console.log("Transcribing audio with Whisper");

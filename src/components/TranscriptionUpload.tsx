@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "sonner";
@@ -40,9 +41,10 @@ export function TranscriptionUpload() {
   const [captionStatus, setCaptionStatus] = useState<{
     checking: boolean;
     available: boolean | null;
-    language?: string;
+    languages?: Array<{ code: string; name: string }>;
     message?: string;
   }>({ checking: false, available: null });
+  const [selectedLanguage, setSelectedLanguage] = useState<string>("en");
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -202,6 +204,43 @@ export function TranscriptionUpload() {
     }
   };
 
+  const getLanguageName = (code: string): string => {
+    const languageNames: { [key: string]: string } = {
+      'en': 'English',
+      'es': 'Spanish',
+      'fr': 'French',
+      'de': 'German',
+      'it': 'Italian',
+      'pt': 'Portuguese',
+      'ru': 'Russian',
+      'ja': 'Japanese',
+      'ko': 'Korean',
+      'zh': 'Chinese (Simplified)',
+      'zh-Hans': 'Chinese (Simplified)',
+      'zh-Hant': 'Chinese (Traditional)',
+      'ar': 'Arabic',
+      'hi': 'Hindi',
+      'nl': 'Dutch',
+      'pl': 'Polish',
+      'tr': 'Turkish',
+      'sv': 'Swedish',
+      'da': 'Danish',
+      'fi': 'Finnish',
+      'no': 'Norwegian',
+      'cs': 'Czech',
+      'el': 'Greek',
+      'he': 'Hebrew',
+      'id': 'Indonesian',
+      'th': 'Thai',
+      'vi': 'Vietnamese',
+      'uk': 'Ukrainian',
+      'ro': 'Romanian',
+      'hu': 'Hungarian',
+      'bg': 'Bulgarian',
+    };
+    return languageNames[code] || code.toUpperCase();
+  };
+
   const checkCaptionAvailability = async (url: string) => {
     // Extract video ID from URL
     const videoIdMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/);
@@ -214,7 +253,7 @@ export function TranscriptionUpload() {
     setCaptionStatus({ checking: true, available: null });
 
     try {
-      // Check captions via YouTube oEmbed and fetch basic info
+      // First verify the video exists
       const response = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
       
       if (!response.ok) {
@@ -226,28 +265,96 @@ export function TranscriptionUpload() {
         return;
       }
 
-      // Try to check if captions exist by attempting to fetch them
-      const captionCheckResponse = await fetch(`https://www.youtube.com/api/timedtext?v=${videoId}&lang=en`);
+      // Fetch the video page to extract all available caption tracks
+      const videoPageResponse = await fetch(`https://www.youtube.com/watch?v=${videoId}`);
       
-      if (captionCheckResponse.ok) {
-        const text = await captionCheckResponse.text();
-        if (text && text.trim().length > 0 && text.includes('<text')) {
+      if (!videoPageResponse.ok) {
+        setCaptionStatus({ 
+          checking: false, 
+          available: null,
+          message: "Unable to check caption availability" 
+        });
+        return;
+      }
+
+      const html = await videoPageResponse.text();
+      
+      // Extract caption tracks from the page
+      const captionTracksMatch = html.match(/"captionTracks":\s*(\[.*?\])/);
+      
+      if (!captionTracksMatch) {
+        // No captions found in video page, try the API as fallback
+        const captionCheckResponse = await fetch(`https://www.youtube.com/api/timedtext?v=${videoId}&lang=en`);
+        
+        if (captionCheckResponse.ok) {
+          const text = await captionCheckResponse.text();
+          if (text && text.trim().length > 0 && text.includes('<text')) {
+            setCaptionStatus({ 
+              checking: false, 
+              available: true, 
+              languages: [{ code: 'en', name: 'English' }],
+              message: "English captions available" 
+            });
+            setSelectedLanguage('en');
+            return;
+          }
+        }
+
+        setCaptionStatus({ 
+          checking: false, 
+          available: false,
+          message: "No captions detected - this video may not be supported" 
+        });
+        return;
+      }
+
+      try {
+        const captionTracks = JSON.parse(captionTracksMatch[1]);
+        
+        if (!captionTracks || captionTracks.length === 0) {
           setCaptionStatus({ 
             checking: false, 
-            available: true, 
-            language: "en",
-            message: "English captions detected - ready for fast transcription!" 
+            available: false,
+            message: "No captions found for this video" 
           });
           return;
         }
-      }
 
-      // If English captions not found, indicate captions may not be available
-      setCaptionStatus({ 
-        checking: false, 
-        available: false,
-        message: "No captions detected - this video may not be supported" 
-      });
+        // Extract all available languages
+        const availableLanguages = captionTracks.map((track: any) => ({
+          code: track.languageCode || track.vssId?.split('.')[0] || 'unknown',
+          name: track.name?.simpleText || getLanguageName(track.languageCode || ''),
+          isAutoGenerated: track.kind === 'asr'
+        }));
+
+        // Sort languages: English first, then alphabetically
+        availableLanguages.sort((a: any, b: any) => {
+          if (a.code === 'en') return -1;
+          if (b.code === 'en') return 1;
+          return a.name.localeCompare(b.name);
+        });
+
+        const languageCount = availableLanguages.length;
+        const hasEnglish = availableLanguages.some((l: any) => l.code === 'en');
+        
+        setCaptionStatus({ 
+          checking: false, 
+          available: true, 
+          languages: availableLanguages,
+          message: `${languageCount} caption language${languageCount !== 1 ? 's' : ''} available`
+        });
+
+        // Auto-select English if available, otherwise first language
+        setSelectedLanguage(hasEnglish ? 'en' : availableLanguages[0].code);
+
+      } catch (parseError) {
+        console.error("Error parsing caption tracks:", parseError);
+        setCaptionStatus({ 
+          checking: false, 
+          available: null,
+          message: "Error parsing caption data" 
+        });
+      }
 
     } catch (error) {
       console.error("Error checking captions:", error);
@@ -294,7 +401,11 @@ export function TranscriptionUpload() {
       }, 500);
 
       const { data, error } = await supabase.functions.invoke("transcribe-youtube", {
-        body: { youtubeUrl, downloadVideo },
+        body: { 
+          youtubeUrl, 
+          downloadVideo,
+          language: selectedLanguage 
+        },
       });
 
       clearInterval(progressInterval);
@@ -336,6 +447,7 @@ export function TranscriptionUpload() {
     setProgress(0);
     setMode('transcribe');
     setCaptionStatus({ checking: false, available: null });
+    setSelectedLanguage("en");
   };
 
   const handleUseCachedResult = (log: any) => {
@@ -625,12 +737,9 @@ export function TranscriptionUpload() {
                       <Subtitles className="h-4 w-4 text-green-600 dark:text-green-400" />
                       <AlertDescription className="text-green-700 dark:text-green-300">
                         <div className="flex items-start justify-between">
-                          <div>
+                          <div className="flex-1">
                             <strong className="font-semibold">Captions Available!</strong>
                             <p className="text-sm mt-1">{captionStatus.message}</p>
-                            {captionStatus.language && (
-                              <p className="text-xs mt-1 opacity-75">Language: {captionStatus.language.toUpperCase()}</p>
-                            )}
                           </div>
                           <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0 ml-2" />
                         </div>
@@ -661,6 +770,28 @@ export function TranscriptionUpload() {
                     </>
                   ) : null}
                 </Alert>
+              )}
+
+              {/* Language Selector */}
+              {captionStatus.available && captionStatus.languages && captionStatus.languages.length > 0 && (
+                <div className="space-y-2">
+                  <Label htmlFor="caption-language">Caption Language</Label>
+                  <Select value={selectedLanguage} onValueChange={setSelectedLanguage} disabled={isProcessing}>
+                    <SelectTrigger id="caption-language">
+                      <SelectValue placeholder="Select language" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {captionStatus.languages.map((lang) => (
+                        <SelectItem key={lang.code} value={lang.code}>
+                          {lang.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {captionStatus.languages.length} language{captionStatus.languages.length !== 1 ? 's' : ''} available for this video
+                  </p>
+                </div>
               )}
 
               <div className="flex items-center space-x-2">
