@@ -125,6 +125,23 @@ interface TagTemplate {
   tags: Tag[];
 }
 
+interface FilterPreset {
+  id: string;
+  name: string;
+  description?: string;
+  filter_data: {
+    searchQuery?: string;
+    contentSearchQuery?: string;
+    selectedStatuses?: string[];
+    selectedTagFilters?: string[];
+    startDate?: string;
+    endDate?: string;
+    lengthRange?: [number, number];
+  };
+  created_at: string;
+  updated_at: string;
+}
+
 type SortField = 'file_title' | 'status' | 'created_at';
 type SortDirection = 'asc' | 'desc' | null;
 
@@ -239,6 +256,10 @@ export default function TranscriptionHistory() {
   const [showQuickTagMenu, setShowQuickTagMenu] = useState(false);
   const [showTagAutocomplete, setShowTagAutocomplete] = useState(false);
   const [tagAutocompleteResults, setTagAutocompleteResults] = useState<Tag[]>([]);
+  const [filterPresets, setFilterPresets] = useState<FilterPreset[]>([]);
+  const [showSavePresetDialog, setShowSavePresetDialog] = useState(false);
+  const [presetName, setPresetName] = useState('');
+  const [presetDescription, setPresetDescription] = useState('');
 
   // Save filter preferences whenever they change
   useEffect(() => {
@@ -454,6 +475,47 @@ export default function TranscriptionHistory() {
     };
   }, []);
 
+  // Fetch filter presets
+  useEffect(() => {
+    const fetchPresets = async () => {
+      const { data, error } = await supabase
+        .from('filter_presets')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching filter presets:', error);
+        return;
+      }
+
+      if (data) {
+        setFilterPresets(data as FilterPreset[]);
+      }
+    };
+
+    fetchPresets();
+
+    // Subscribe to changes
+    const presetsChannel = supabase
+      .channel('filter_presets_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'filter_presets'
+        },
+        () => {
+          fetchPresets();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(presetsChannel);
+    };
+  }, []);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -552,6 +614,81 @@ export default function TranscriptionHistory() {
     setShowTagAutocomplete(false);
     
     toast.success(`Filtering by tag: ${tag.name}`);
+  };
+
+  // Save current filters as a preset
+  const handleSavePreset = async () => {
+    if (!presetName.trim()) {
+      toast.error('Please enter a preset name');
+      return;
+    }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      toast.error('You must be logged in to save presets');
+      return;
+    }
+
+    const filterData = {
+      searchQuery,
+      contentSearchQuery,
+      selectedStatuses: Array.from(selectedStatuses),
+      selectedTagFilters: Array.from(selectedTagFilters),
+      startDate,
+      endDate,
+      lengthRange,
+    };
+
+    const { error } = await supabase
+      .from('filter_presets')
+      .insert({
+        user_id: user.id,
+        name: presetName,
+        description: presetDescription || null,
+        filter_data: filterData,
+      });
+
+    if (error) {
+      console.error('Error saving preset:', error);
+      toast.error('Failed to save preset');
+      return;
+    }
+
+    toast.success(`Preset "${presetName}" saved successfully`);
+    setShowSavePresetDialog(false);
+    setPresetName('');
+    setPresetDescription('');
+  };
+
+  // Load a saved preset
+  const handleLoadPreset = (preset: FilterPreset) => {
+    const data = preset.filter_data;
+    
+    setSearchQuery(data.searchQuery || '');
+    setContentSearchQuery(data.contentSearchQuery || '');
+    setSelectedStatuses(new Set(data.selectedStatuses || []));
+    setSelectedTagFilters(new Set(data.selectedTagFilters || []));
+    setStartDate(data.startDate || '');
+    setEndDate(data.endDate || '');
+    setLengthRange(data.lengthRange || [0, 50000]);
+
+    toast.success(`Loaded preset: ${preset.name}`);
+  };
+
+  // Delete a preset
+  const handleDeletePreset = async (presetId: string, presetName: string) => {
+    const { error } = await supabase
+      .from('filter_presets')
+      .delete()
+      .eq('id', presetId);
+
+    if (error) {
+      console.error('Error deleting preset:', error);
+      toast.error('Failed to delete preset');
+      return;
+    }
+
+    toast.success(`Deleted preset: ${presetName}`);
   };
 
   useEffect(() => {
@@ -2303,6 +2440,85 @@ export default function TranscriptionHistory() {
                   <BarChart3 className="h-4 w-4 mr-2" />
                   {showAnalytics ? 'Hide' : 'Show'} Analytics
                 </Button>
+                
+                {/* Filter Presets */}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      <Filter className="h-4 w-4 mr-2" />
+                      Presets
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-80 bg-card border shadow-lg z-50" align="end">
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-medium text-sm">Filter Presets</h4>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setShowSavePresetDialog(true)}
+                        >
+                          <Plus className="h-4 w-4 mr-1" />
+                          Save Current
+                        </Button>
+                      </div>
+
+                      {filterPresets.length === 0 ? (
+                        <p className="text-sm text-muted-foreground text-center py-4">
+                          No saved presets
+                        </p>
+                      ) : (
+                        <div className="space-y-2 max-h-80 overflow-y-auto">
+                          {filterPresets.map((preset) => (
+                            <div
+                              key={preset.id}
+                              className="flex items-start justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                            >
+                              <div className="flex-1 min-w-0 cursor-pointer" onClick={() => handleLoadPreset(preset)}>
+                                <h5 className="font-medium text-sm truncate">{preset.name}</h5>
+                                {preset.description && (
+                                  <p className="text-xs text-muted-foreground line-clamp-2 mt-1">
+                                    {preset.description}
+                                  </p>
+                                )}
+                                <div className="flex flex-wrap gap-1 mt-2">
+                                  {preset.filter_data.searchQuery && (
+                                    <Badge variant="secondary" className="text-xs">Search</Badge>
+                                  )}
+                                  {preset.filter_data.selectedStatuses && preset.filter_data.selectedStatuses.length > 0 && (
+                                    <Badge variant="secondary" className="text-xs">
+                                      {preset.filter_data.selectedStatuses.length} status(es)
+                                    </Badge>
+                                  )}
+                                  {preset.filter_data.selectedTagFilters && preset.filter_data.selectedTagFilters.length > 0 && (
+                                    <Badge variant="secondary" className="text-xs">
+                                      {preset.filter_data.selectedTagFilters.length} tag(s)
+                                    </Badge>
+                                  )}
+                                  {(preset.filter_data.startDate || preset.filter_data.endDate) && (
+                                    <Badge variant="secondary" className="text-xs">Date range</Badge>
+                                  )}
+                                </div>
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 ml-2 flex-shrink-0"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeletePreset(preset.id, preset.name);
+                                }}
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+                
                 {!compareMode ? (
                   <Button
                     variant="outline"
@@ -4114,6 +4330,75 @@ export default function TranscriptionHistory() {
               setCompareIds(new Set());
             }}>
               Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Save Filter Preset Dialog */}
+      <Dialog open={showSavePresetDialog} onOpenChange={setShowSavePresetDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Save Filter Preset</DialogTitle>
+            <DialogDescription>
+              Save your current filter settings to quickly reapply them later
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="preset-name">Preset Name *</Label>
+              <Input
+                id="preset-name"
+                placeholder="e.g., Last Week Meetings"
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+                maxLength={50}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="preset-description">Description (Optional)</Label>
+              <Input
+                id="preset-description"
+                placeholder="Brief description of this filter preset"
+                value={presetDescription}
+                onChange={(e) => setPresetDescription(e.target.value)}
+                maxLength={200}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Current Filters</Label>
+              <div className="p-3 border rounded-lg bg-muted/20 space-y-1 text-xs">
+                {searchQuery && <div>• Search: "{searchQuery}"</div>}
+                {contentSearchQuery && <div>• Content: "{contentSearchQuery}"</div>}
+                {selectedStatuses.size > 0 && <div>• Status: {Array.from(selectedStatuses).join(', ')}</div>}
+                {selectedTagFilters.size > 0 && <div>• Tags: {selectedTagFilters.size} selected</div>}
+                {startDate && <div>• Start: {format(new Date(startDate), 'MMM d, yyyy')}</div>}
+                {endDate && <div>• End: {format(new Date(endDate), 'MMM d, yyyy')}</div>}
+                {(lengthRange[0] !== 0 || lengthRange[1] !== 50000) && (
+                  <div>• Length: {lengthRange[0].toLocaleString()} - {lengthRange[1].toLocaleString()}</div>
+                )}
+                {!searchQuery && !contentSearchQuery && selectedStatuses.size === 0 && 
+                 selectedTagFilters.size === 0 && !startDate && !endDate && 
+                 lengthRange[0] === 0 && lengthRange[1] === 50000 && (
+                  <div className="text-muted-foreground italic">No filters currently applied</div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => {
+              setShowSavePresetDialog(false);
+              setPresetName('');
+              setPresetDescription('');
+            }}>
+              Cancel
+            </Button>
+            <Button onClick={handleSavePreset}>
+              Save Preset
             </Button>
           </div>
         </DialogContent>
