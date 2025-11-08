@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import JSZip from "jszip";
@@ -91,6 +91,7 @@ export function DuplicateCleanupPreview({
   const [retentionDays, setRetentionDays] = useState(30);
   const [autoCleanupEnabled, setAutoCleanupEnabled] = useState(true);
   const [selectedBackups, setSelectedBackups] = useState<Set<string>>(new Set());
+  const backupFileInputRef = useRef<HTMLInputElement>(null);
   
   // Fetch retention settings
   const { data: retentionSettings } = useQuery({
@@ -1146,6 +1147,73 @@ export function DuplicateCleanupPreview({
     toast.success("Backup exported successfully");
   };
 
+  const importBackup = useMutation({
+    mutationFn: async (backupData: any) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      const { data, error } = await supabase
+        .from("preset_backups")
+        .insert({
+          user_id: user.id,
+          original_preset_id: backupData.original_preset_id,
+          preset_name: backupData.preset_name,
+          preset_description: backupData.preset_description,
+          preset_filter_data: backupData.preset_filter_data,
+          backup_reason: "imported",
+          backed_up_at: backupData.backed_up_at || new Date().toISOString(),
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["preset-backups"] });
+      toast.success("Backup imported successfully");
+    },
+    onError: (error: any) => {
+      toast.error("Failed to import backup: " + error.message);
+    },
+  });
+
+  const handleBackupFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.endsWith('.json')) {
+      toast.error("Please select a valid JSON file");
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const backupData = JSON.parse(text);
+
+      // Validate the structure
+      const requiredFields = ['preset_name', 'preset_filter_data'];
+      const hasRequiredFields = requiredFields.every(field => field in backupData[0] || field in backupData);
+      
+      if (!hasRequiredFields) {
+        toast.error("Invalid backup file format");
+        return;
+      }
+
+      // Handle both single object and array formats
+      const dataToImport = Array.isArray(backupData) ? backupData[0] : backupData;
+      
+      await importBackup.mutateAsync(dataToImport);
+    } catch (error: any) {
+      toast.error("Failed to read backup file: " + error.message);
+    }
+
+    // Reset the input
+    if (backupFileInputRef.current) {
+      backupFileInputRef.current.value = '';
+    }
+  };
+
   const exportAllPresets = async () => {
     if (!filterPresets || filterPresets.length === 0) {
       toast.error("No presets to export");
@@ -2080,6 +2148,29 @@ export function DuplicateCleanupPreview({
               Restore presets that were backed up before being overwritten during import
             </DialogDescription>
           </DialogHeader>
+
+          <div className="flex gap-2 items-center">
+            <input
+              ref={backupFileInputRef}
+              type="file"
+              accept=".json"
+              onChange={handleBackupFileUpload}
+              className="hidden"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => backupFileInputRef.current?.click()}
+              disabled={importBackup.isPending}
+            >
+              {importBackup.isPending ? (
+                <Loader2 className="h-3 w-3 mr-2 animate-spin" />
+              ) : (
+                <Upload className="h-3 w-3 mr-2" />
+              )}
+              Import Backup
+            </Button>
+          </div>
           
           {selectedBackups.size > 0 && (
             <div className="flex items-center gap-2 p-3 bg-muted rounded-lg border">
