@@ -515,9 +515,16 @@ export function TranscriptionUpload() {
       return;
     }
 
-    // Warn if no captions but allow to proceed (will use audio download fallback)
+    // Block transcription if captions aren't available
     if (captionStatus.available === false) {
-      toast.info("No captions found. Will download and transcribe audio - this may take longer.");
+      toast.error("This video doesn't have captions. Please select a video with captions/subtitles.");
+      return;
+    }
+
+    // Wait for caption check to complete
+    if (captionStatus.available === null && !captionStatus.checking) {
+      toast.warning("Checking caption availability... Please wait.");
+      return;
     }
 
     const maxRetries = 3;
@@ -1260,7 +1267,9 @@ export function TranscriptionUpload() {
                 disabled={
                   !youtubeUrl.trim() || 
                   isProcessing || 
-                  captionStatus.checking
+                  captionStatus.checking ||
+                  captionStatus.available === false ||
+                  captionStatus.available === null
                 }
                 className="w-full"
               >
@@ -1268,6 +1277,21 @@ export function TranscriptionUpload() {
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Processing...
+                  </>
+                ) : captionStatus.checking ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Checking Captions...
+                  </>
+                ) : captionStatus.available === false ? (
+                  <>
+                    <AlertTriangle className="mr-2 h-4 w-4" />
+                    No Captions Available
+                  </>
+                ) : captionStatus.available === null ? (
+                  <>
+                    <AlertCircle className="mr-2 h-4 w-4" />
+                    Waiting for Caption Check...
                   </>
                 ) : (
                   <>
@@ -1278,10 +1302,11 @@ export function TranscriptionUpload() {
               </Button>
               
               {captionStatus.available === false && youtubeUrl.trim() && !isProcessing && (
-                <Alert className="border-yellow-500 bg-yellow-50 dark:bg-yellow-950">
-                  <AlertCircle className="h-4 w-4 text-yellow-600" />
-                  <AlertDescription className="text-yellow-700 dark:text-yellow-300 text-xs">
-                    No captions found. The system will download the audio and transcribe it using AI, which may take longer.
+                <Alert variant="destructive" className="border-red-500">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertDescription>
+                    <strong className="font-semibold">Captions Required</strong>
+                    <p className="text-sm mt-1">This video doesn't have captions/subtitles enabled. Please select a different video that has captions available.</p>
                   </AlertDescription>
                 </Alert>
               )}
