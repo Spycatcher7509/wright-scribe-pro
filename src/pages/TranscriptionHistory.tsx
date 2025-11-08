@@ -691,6 +691,83 @@ export default function TranscriptionHistory() {
     toast.success(`Deleted preset: ${presetName}`);
   };
 
+  // Export presets as JSON
+  const handleExportPresets = () => {
+    if (filterPresets.length === 0) {
+      toast.error('No presets to export');
+      return;
+    }
+
+    const exportData = {
+      version: '1.0',
+      exported_at: new Date().toISOString(),
+      presets: filterPresets.map(preset => ({
+        name: preset.name,
+        description: preset.description,
+        filter_data: preset.filter_data,
+      })),
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `filter_presets_${format(new Date(), 'yyyy-MM-dd_HHmmss')}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+
+    toast.success(`Exported ${filterPresets.length} preset(s)`);
+  };
+
+  // Import presets from JSON
+  const handleImportPresets = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+
+      // Validate structure
+      if (!data.version || !data.presets || !Array.isArray(data.presets)) {
+        toast.error('Invalid preset file format');
+        return;
+      }
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast.error('You must be logged in to import presets');
+        return;
+      }
+
+      // Import presets
+      const presetsToImport = data.presets.map((preset: any) => ({
+        user_id: user.id,
+        name: preset.name,
+        description: preset.description || null,
+        filter_data: preset.filter_data,
+      }));
+
+      const { error } = await supabase
+        .from('filter_presets')
+        .insert(presetsToImport);
+
+      if (error) {
+        console.error('Error importing presets:', error);
+        toast.error('Failed to import presets');
+        return;
+      }
+
+      toast.success(`Imported ${presetsToImport.length} preset(s) successfully`);
+    } catch (error) {
+      console.error('Error parsing preset file:', error);
+      toast.error('Invalid JSON file');
+    }
+
+    // Reset file input
+    event.target.value = '';
+  };
+
   useEffect(() => {
     filterLogs();
     setCurrentPage(1); // Reset to first page when filters or sort changes
@@ -2453,14 +2530,39 @@ export default function TranscriptionHistory() {
                     <div className="space-y-4">
                       <div className="flex items-center justify-between">
                         <h4 className="font-medium text-sm">Filter Presets</h4>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setShowSavePresetDialog(true)}
-                        >
-                          <Plus className="h-4 w-4 mr-1" />
-                          Save Current
-                        </Button>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleExportPresets}
+                            disabled={filterPresets.length === 0}
+                            title="Export all presets"
+                          >
+                            <Download className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => document.getElementById('import-presets')?.click()}
+                            title="Import presets"
+                          >
+                            <FileArchive className="h-4 w-4" />
+                          </Button>
+                          <input
+                            id="import-presets"
+                            type="file"
+                            accept=".json"
+                            onChange={handleImportPresets}
+                            className="hidden"
+                          />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setShowSavePresetDialog(true)}
+                          >
+                            <Plus className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
 
                       {filterPresets.length === 0 ? (
