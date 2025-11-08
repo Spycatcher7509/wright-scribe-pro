@@ -469,17 +469,93 @@ export function DuplicateCleanupPreview({
     }
 
     try {
-      const text = await importFile.text();
-      const presetData = JSON.parse(text);
+      const isZip = importFile.name.toLowerCase().endsWith('.zip');
+      
+      if (isZip) {
+        // Handle ZIP file with multiple presets
+        await handleBulkImport(importFile);
+      } else {
+        // Handle single JSON file
+        const text = await importFile.text();
+        const presetData = JSON.parse(text);
 
-      // Validate the imported data
-      if (!presetData.name || !presetData.filter_data) {
-        throw new Error("Invalid preset file format");
+        // Validate the imported data
+        if (!presetData.name || !presetData.filter_data) {
+          throw new Error("Invalid preset file format");
+        }
+
+        importPresetMutation.mutate(presetData);
       }
-
-      importPresetMutation.mutate(presetData);
     } catch (error: any) {
       toast.error("Failed to parse preset file: " + error.message);
+    }
+  };
+
+  const handleBulkImport = async (zipFile: File) => {
+    setIsBulkExporting(true);
+    try {
+      const zip = await JSZip.loadAsync(zipFile);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      const presets: any[] = [];
+      const errors: string[] = [];
+
+      // Extract all JSON files from the ZIP
+      const jsonFiles = Object.keys(zip.files).filter(
+        filename => filename.toLowerCase().endsWith('.json') && !filename.includes('manifest.json')
+      );
+
+      // Parse each JSON file
+      for (const filename of jsonFiles) {
+        try {
+          const content = await zip.files[filename].async('text');
+          const presetData = JSON.parse(content);
+
+          // Validate the preset data
+          if (presetData.name && presetData.filter_data) {
+            presets.push({
+              user_id: user.id,
+              name: presetData.name,
+              description: presetData.description || null,
+              filter_data: presetData.filter_data,
+            });
+          } else {
+            errors.push(`${filename}: Invalid format`);
+          }
+        } catch (error: any) {
+          errors.push(`${filename}: ${error.message}`);
+        }
+      }
+
+      if (presets.length === 0) {
+        throw new Error("No valid presets found in ZIP file");
+      }
+
+      // Bulk insert all presets
+      const { error } = await supabase
+        .from("filter_presets")
+        .insert(presets);
+
+      if (error) throw error;
+
+      // Refresh presets list
+      queryClient.invalidateQueries({ queryKey: ["cleanup-filter-presets"] });
+      setShowImportDialog(false);
+      setImportFile(null);
+
+      // Show success message with details
+      const successMsg = `Successfully imported ${presets.length} preset${presets.length !== 1 ? 's' : ''}`;
+      const errorMsg = errors.length > 0 ? ` (${errors.length} failed)` : '';
+      toast.success(successMsg + errorMsg);
+
+      if (errors.length > 0) {
+        console.warn("Import errors:", errors);
+      }
+    } catch (error: any) {
+      toast.error("Failed to import presets: " + error.message);
+    } finally {
+      setIsBulkExporting(false);
     }
   };
 
@@ -1036,28 +1112,33 @@ export function DuplicateCleanupPreview({
       <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Import Filter Preset</DialogTitle>
+            <DialogTitle>Import Filter Preset(s)</DialogTitle>
             <DialogDescription>
-              Import a preset from a JSON file shared by another user
+              Import a single preset JSON file or a ZIP file with multiple presets
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="preset-file">Select Preset File</Label>
+              <Label htmlFor="preset-file">Select File</Label>
               <Input
                 id="preset-file"
                 type="file"
-                accept=".json"
+                accept=".json,.zip"
                 onChange={(e) => setImportFile(e.target.files?.[0] || null)}
               />
               <p className="text-xs text-muted-foreground">
-                Choose a .json file exported from another user's presets
+                Choose a .json file (single preset) or .zip file (multiple presets)
               </p>
             </div>
             {importFile && (
               <div className="text-sm bg-muted p-3 rounded-lg">
                 <div className="font-medium mb-1">File selected:</div>
                 <div className="text-muted-foreground">{importFile.name}</div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  {importFile.name.toLowerCase().endsWith('.zip') 
+                    ? 'ZIP archive - will import all presets found inside' 
+                    : 'JSON file - will import single preset'}
+                </div>
               </div>
             )}
           </div>
@@ -1073,10 +1154,12 @@ export function DuplicateCleanupPreview({
             </Button>
             <Button
               onClick={handleImportFile}
-              disabled={!importFile || importPresetMutation.isPending}
+              disabled={!importFile || isBulkExporting || importPresetMutation.isPending}
             >
-              {importPresetMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Import Preset
+              {(isBulkExporting || importPresetMutation.isPending) && (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              )}
+              Import {importFile?.name.toLowerCase().endsWith('.zip') ? 'All' : 'Preset'}
             </Button>
           </DialogFooter>
         </DialogContent>
