@@ -221,6 +221,7 @@ export default function TranscriptionHistory() {
   const [editingCategory, setEditingCategory] = useState<TagCategory | null>(null);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newCategoryColor, setNewCategoryColor] = useState('#6b7280');
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string | null>(null);
 
   // Save filter preferences whenever they change
   useEffect(() => {
@@ -2054,43 +2055,140 @@ export default function TranscriptionHistory() {
                       <Tag className="ml-2 h-4 w-4 opacity-50" />
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-64 bg-card border shadow-lg z-50" align="start">
-                    <div className="space-y-2">
-                      <h4 className="font-medium text-sm mb-2">Filter by Tags</h4>
+                  <PopoverContent className="w-80 bg-card border shadow-lg z-50" align="start">
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-medium text-sm">Filter by Tags</h4>
+                        {selectedTagFilters.size > 0 && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setSelectedTagFilters(new Set())}
+                          >
+                            Clear All
+                          </Button>
+                        )}
+                      </div>
+
+                      {/* Category Filter */}
+                      {tagCategories.length > 0 && (
+                        <div className="space-y-2 pb-2 border-b">
+                          <Label className="text-xs text-muted-foreground">Filter by Category</Label>
+                          <div className="flex flex-wrap gap-1">
+                            <Button
+                              variant={selectedCategoryFilter === null ? "default" : "outline"}
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() => setSelectedCategoryFilter(null)}
+                            >
+                              All
+                            </Button>
+                            <Button
+                              variant={selectedCategoryFilter === "uncategorized" ? "default" : "outline"}
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() => setSelectedCategoryFilter("uncategorized")}
+                            >
+                              Uncategorized
+                            </Button>
+                            {tagCategories.map((category) => (
+                              <Button
+                                key={category.id}
+                                variant={selectedCategoryFilter === category.id ? "default" : "outline"}
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={() => setSelectedCategoryFilter(category.id)}
+                              >
+                                <div
+                                  className="w-2 h-2 rounded mr-1"
+                                  style={{ backgroundColor: category.color }}
+                                />
+                                {category.name}
+                              </Button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Tags List */}
                       {tags.length === 0 ? (
                         <p className="text-sm text-muted-foreground py-2">No tags available</p>
                       ) : (
-                        <div className="space-y-2 max-h-60 overflow-y-auto">
-                          {tags.map((tag) => (
-                            <div key={tag.id} className="flex items-center space-x-2">
-                              <Checkbox
-                                id={`tag-filter-${tag.id}`}
-                                checked={selectedTagFilters.has(tag.id)}
-                                onCheckedChange={() => toggleTagFilter(tag.id)}
-                              />
-                              <label
-                                htmlFor={`tag-filter-${tag.id}`}
-                                className="flex items-center gap-2 text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
-                              >
-                                <div
-                                  className="w-3 h-3 rounded"
-                                  style={{ backgroundColor: tag.color }}
-                                />
-                                {tag.name}
-                              </label>
+                        <div className="space-y-3 max-h-80 overflow-y-auto">
+                          {/* Uncategorized Tags */}
+                          {(selectedCategoryFilter === null || selectedCategoryFilter === "uncategorized") && 
+                            tags.filter(tag => !tag.category_id).length > 0 && (
+                            <div className="space-y-2">
+                              <h5 className="text-xs font-medium text-muted-foreground">Uncategorized</h5>
+                              <div className="space-y-1.5">
+                                {tags.filter(tag => !tag.category_id).map((tag) => (
+                                  <div key={tag.id} className="flex items-center space-x-2 p-1.5 rounded hover:bg-muted/50">
+                                    <Checkbox
+                                      id={`tag-filter-${tag.id}`}
+                                      checked={selectedTagFilters.has(tag.id)}
+                                      onCheckedChange={() => toggleTagFilter(tag.id)}
+                                    />
+                                    <label
+                                      htmlFor={`tag-filter-${tag.id}`}
+                                      className="flex items-center gap-2 text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
+                                    >
+                                      <div
+                                        className="w-3 h-3 rounded"
+                                        style={{ backgroundColor: tag.color }}
+                                      />
+                                      {tag.name}
+                                    </label>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
-                          ))}
+                          )}
+
+                          {/* Categorized Tags */}
+                          {tagCategories.map((category) => {
+                            if (selectedCategoryFilter !== null && 
+                                selectedCategoryFilter !== category.id && 
+                                selectedCategoryFilter !== "uncategorized") {
+                              return null;
+                            }
+
+                            const categoryTags = tags.filter(tag => tag.category_id === category.id);
+                            if (categoryTags.length === 0) return null;
+
+                            return (
+                              <div key={category.id} className="space-y-2">
+                                <div className="flex items-center gap-2">
+                                  <div
+                                    className="w-2.5 h-2.5 rounded"
+                                    style={{ backgroundColor: category.color }}
+                                  />
+                                  <h5 className="text-xs font-medium text-muted-foreground">{category.name}</h5>
+                                </div>
+                                <div className="space-y-1.5">
+                                  {categoryTags.map((tag) => (
+                                    <div key={tag.id} className="flex items-center space-x-2 p-1.5 rounded hover:bg-muted/50">
+                                      <Checkbox
+                                        id={`tag-filter-${tag.id}`}
+                                        checked={selectedTagFilters.has(tag.id)}
+                                        onCheckedChange={() => toggleTagFilter(tag.id)}
+                                      />
+                                      <label
+                                        htmlFor={`tag-filter-${tag.id}`}
+                                        className="flex items-center gap-2 text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
+                                      >
+                                        <div
+                                          className="w-3 h-3 rounded"
+                                          style={{ backgroundColor: tag.color }}
+                                        />
+                                        {tag.name}
+                                      </label>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
-                      )}
-                      {selectedTagFilters.size > 0 && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="w-full mt-2"
-                          onClick={() => setSelectedTagFilters(new Set())}
-                        >
-                          Clear Tag Filters
-                        </Button>
                       )}
                     </div>
                   </PopoverContent>
