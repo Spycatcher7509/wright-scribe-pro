@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { Database, Loader2, Trash2, Play, Clock } from "lucide-react";
+import { DuplicateCleanupPreview } from "./DuplicateCleanupPreview";
 
 const scheduleOptions = [
   { value: "0 0 * * 0", label: "Weekly (Sunday midnight)" },
@@ -180,21 +181,22 @@ export function DuplicateCleanupConfig() {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center">
-            <Trash2 className="h-5 w-5 text-destructive" />
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center">
+              <Trash2 className="h-5 w-5 text-destructive" />
+            </div>
+            <div>
+              <CardTitle>Automatic Cleanup Configuration</CardTitle>
+              <CardDescription>
+                Configure automatic cleanup rules for duplicate transcriptions
+              </CardDescription>
+            </div>
           </div>
-          <div>
-            <CardTitle>Automatic Cleanup Configuration</CardTitle>
-            <CardDescription>
-              Configure automatic cleanup rules for duplicate transcriptions
-            </CardDescription>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent>
+        </CardHeader>
+        <CardContent>
         <form onSubmit={(e) => updateConfigMutation.mutate(e)} className="space-y-6">
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
@@ -315,5 +317,12 @@ export function DuplicateCleanupConfig() {
         </form>
       </CardContent>
     </Card>
+
+    <DuplicateCleanupPreview
+      keepLatest={keepLatest}
+      deleteOlderThanDays={deleteOlderThanDays}
+      enabled={enabled}
+    />
+  </div>
   );
 }
