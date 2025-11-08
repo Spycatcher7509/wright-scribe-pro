@@ -153,6 +153,38 @@ export type Database = {
           },
         ]
       }
+      preset_usage: {
+        Row: {
+          created_at: string
+          event_type: string
+          id: string
+          preset_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          event_type: string
+          id?: string
+          preset_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          event_type?: string
+          id?: string
+          preset_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "preset_usage_preset_id_fkey"
+            columns: ["preset_id"]
+            isOneToOne: false
+            referencedRelation: "filter_presets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           created_at: string

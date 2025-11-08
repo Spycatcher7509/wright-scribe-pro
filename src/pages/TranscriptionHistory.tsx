@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet, Columns3, HelpCircle, Keyboard, BarChart3, Clock, Calendar, GitCompare, Merge, Sliders, Tag, Plus, X, Edit2, Palette, Star, MessageSquare } from "lucide-react";
+import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet, Columns3, HelpCircle, Keyboard, BarChart3, Clock, Calendar, GitCompare, Merge, Sliders, Tag, Plus, X, Edit2, Palette, Star, MessageSquare, BarChart2 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO, startOfDay, startOfHour, getHours, getDay, startOfWeek, startOfMonth, subDays, endOfDay } from "date-fns";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -16,6 +16,7 @@ import { diffWords } from 'diff';
 import TagUsageHeatmap from "@/components/TagUsageHeatmap";
 import TagUsageStatistics from "@/components/TagUsageStatistics";
 import TagTemplateManager from "@/components/TagTemplateManager";
+import { PresetAnalytics } from "@/components/PresetAnalytics";
 import { cn } from "@/lib/utils";
 
 // Color palette themes for tags
@@ -309,6 +310,7 @@ export default function TranscriptionHistory() {
   const [newComment, setNewComment] = useState('');
   const [selectedPresetForComments, setSelectedPresetForComments] = useState<FilterPreset | null>(null);
   const [marketplaceSortBy, setMarketplaceSortBy] = useState<'rating' | 'clones' | 'recent'>('rating');
+  const [showPresetAnalytics, setShowPresetAnalytics] = useState(false);
 
   // Save filter preferences whenever they change
   useEffect(() => {
@@ -765,7 +767,7 @@ export default function TranscriptionHistory() {
   };
 
   // Load a saved preset
-  const handleLoadPreset = (preset: FilterPreset) => {
+  const handleLoadPreset = async (preset: FilterPreset) => {
     const data = preset.filter_data;
     
     setSearchQuery(data.searchQuery || '');
@@ -777,6 +779,9 @@ export default function TranscriptionHistory() {
     setLengthRange(data.lengthRange || [0, 50000]);
 
     toast.success(`Loaded preset: ${preset.name}`);
+    
+    // Track apply event
+    await trackPresetUsage(preset.id, 'apply');
   };
 
   // Delete a preset
@@ -919,6 +924,23 @@ export default function TranscriptionHistory() {
       .eq('id', preset.id);
 
     toast.success(`Cloned "${preset.name}" to your presets`);
+    
+    // Track clone event
+    await trackPresetUsage(preset.id, 'clone');
+  };
+
+  // Track preset usage
+  const trackPresetUsage = async (presetId: string, eventType: 'view' | 'clone' | 'apply') => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    await supabase
+      .from('preset_usage')
+      .insert({
+        preset_id: presetId,
+        user_id: user.id,
+        event_type: eventType,
+      });
   };
 
   // Rate a preset
@@ -2779,6 +2801,13 @@ export default function TranscriptionHistory() {
           </div>
         )}
 
+        {/* Preset Analytics */}
+        {showPresetAnalytics && (
+          <div className="mb-6">
+            <PresetAnalytics />
+          </div>
+        )}
+
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -2804,6 +2833,14 @@ export default function TranscriptionHistory() {
                 >
                   <BarChart3 className="h-4 w-4 mr-2" />
                   {showAnalytics ? 'Hide' : 'Show'} Analytics
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowPresetAnalytics(!showPresetAnalytics)}
+                >
+                  <BarChart2 className="h-4 w-4 mr-2" />
+                  Preset Analytics
                 </Button>
                 
                 {/* Filter Presets */}
@@ -4989,6 +5026,7 @@ export default function TranscriptionHistory() {
                               variant="outline"
                               size="sm"
                               onClick={() => {
+                                trackPresetUsage(preset.id, 'view');
                                 setSelectedPresetForComments(preset);
                                 fetchPresetComments(preset.id);
                               }}
