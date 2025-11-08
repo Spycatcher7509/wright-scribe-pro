@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import JSZip from "jszip";
+import * as Diff from "diff";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -31,7 +32,8 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Loader2, FileText, Check, X, Shield, ShieldOff, Trash2, Keyboard, Search, Filter, CalendarIcon, Save, Star, StarOff, Download, Upload, FolderDown, AlertTriangle, History, RotateCcw } from "lucide-react";
+import { Loader2, FileText, Check, X, Shield, ShieldOff, Trash2, Keyboard, Search, Filter, CalendarIcon, Save, Star, StarOff, Download, Upload, FolderDown, AlertTriangle, History, RotateCcw, GitCompare } from "lucide-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { formatDistanceToNow, format } from "date-fns";
 import { toast } from "sonner";
 
@@ -763,6 +765,33 @@ export function DuplicateCleanupPreview({
       newMap.set(index, resolution);
       return newMap;
     });
+  };
+
+  const formatFilterDataForDisplay = (filterData: any) => {
+    const parts: string[] = [];
+    
+    if (filterData.searchQuery) {
+      parts.push(`Search: "${filterData.searchQuery}"`);
+    }
+    
+    if (filterData.filterType && filterData.filterType !== "all") {
+      parts.push(`Type: ${filterData.filterType.replace("-", " ")}`);
+    }
+    
+    if (filterData.filterDate) {
+      parts.push(`Date: Before ${format(new Date(filterData.filterDate), "PP")}`);
+    }
+    
+    return parts.length > 0 ? parts.join("\n") : "No filters set";
+  };
+
+  const comparePresets = (existing: any, imported: any) => {
+    const existingText = formatFilterDataForDisplay(existing.filter_data);
+    const importedText = formatFilterDataForDisplay(imported.filter_data);
+    
+    const diff = Diff.diffLines(existingText, importedText);
+    
+    return diff;
   };
 
   const restoreFromBackup = useMutation({
@@ -1544,32 +1573,137 @@ export function DuplicateCleanupPreview({
                         </div>
                         
                         {isConflict && (
-                          <div className="flex gap-2 pt-2 border-t">
-                            <Button
-                              variant={presetResolution === "skip" ? "default" : "outline"}
-                              size="sm"
-                              onClick={() => setResolutionForPreset(index, "skip")}
-                              className="flex-1 h-8 text-xs"
-                            >
-                              Skip
-                            </Button>
-                            <Button
-                              variant={presetResolution === "rename" ? "default" : "outline"}
-                              size="sm"
-                              onClick={() => setResolutionForPreset(index, "rename")}
-                              className="flex-1 h-8 text-xs"
-                            >
-                              Rename
-                            </Button>
-                            <Button
-                              variant={presetResolution === "overwrite" ? "destructive" : "outline"}
-                              size="sm"
-                              onClick={() => setResolutionForPreset(index, "overwrite")}
-                              className="flex-1 h-8 text-xs"
-                            >
-                              Overwrite
-                            </Button>
-                          </div>
+                          <>
+                            <div className="flex gap-2 pt-2 border-t">
+                              <Button
+                                variant={presetResolution === "skip" ? "default" : "outline"}
+                                size="sm"
+                                onClick={() => setResolutionForPreset(index, "skip")}
+                                className="flex-1 h-8 text-xs"
+                              >
+                                Skip
+                              </Button>
+                              <Button
+                                variant={presetResolution === "rename" ? "default" : "outline"}
+                                size="sm"
+                                onClick={() => setResolutionForPreset(index, "rename")}
+                                className="flex-1 h-8 text-xs"
+                              >
+                                Rename
+                              </Button>
+                              <Button
+                                variant={presetResolution === "overwrite" ? "destructive" : "outline"}
+                                size="sm"
+                                onClick={() => setResolutionForPreset(index, "overwrite")}
+                                className="flex-1 h-8 text-xs"
+                              >
+                                Overwrite
+                              </Button>
+                            </div>
+                            
+                            <Collapsible>
+                              <CollapsibleTrigger asChild>
+                                <Button variant="ghost" size="sm" className="w-full h-8 text-xs">
+                                  <GitCompare className="h-3 w-3 mr-2" />
+                                  Compare Versions
+                                </Button>
+                              </CollapsibleTrigger>
+                              <CollapsibleContent className="mt-2">
+                                <div className="border rounded-lg overflow-hidden">
+                                  <div className="grid grid-cols-2 divide-x bg-muted/50">
+                                    <div className="p-2">
+                                      <div className="text-xs font-medium text-destructive flex items-center gap-1">
+                                        <X className="h-3 w-3" />
+                                        Current (Existing)
+                                      </div>
+                                    </div>
+                                    <div className="p-2">
+                                      <div className="text-xs font-medium text-primary flex items-center gap-1">
+                                        <Check className="h-3 w-3" />
+                                        Imported (New)
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="grid grid-cols-2 divide-x text-xs">
+                                    {(() => {
+                                      const existingPreset = filterPresets?.find(p => p.name === preset.name);
+                                      if (!existingPreset) return null;
+                                      
+                                      const diffResult = comparePresets(existingPreset, preset);
+                                      
+                                      return (
+                                        <>
+                                          <div className="p-3 bg-destructive/5">
+                                            <div className="space-y-1 font-mono text-xs">
+                                              {diffResult.map((part, i) => {
+                                                if (part.removed) {
+                                                  return (
+                                                    <div key={i} className="bg-destructive/20 text-destructive px-1 py-0.5 rounded">
+                                                      {part.value.split('\n').filter(Boolean).map((line, j) => (
+                                                        <div key={j}>- {line}</div>
+                                                      ))}
+                                                    </div>
+                                                  );
+                                                }
+                                                if (!part.added) {
+                                                  return (
+                                                    <div key={i} className="text-muted-foreground">
+                                                      {part.value.split('\n').filter(Boolean).map((line, j) => (
+                                                        <div key={j}>{line}</div>
+                                                      ))}
+                                                    </div>
+                                                  );
+                                                }
+                                                return null;
+                                              })}
+                                            </div>
+                                          </div>
+                                          <div className="p-3 bg-primary/5">
+                                            <div className="space-y-1 font-mono text-xs">
+                                              {diffResult.map((part, i) => {
+                                                if (part.added) {
+                                                  return (
+                                                    <div key={i} className="bg-primary/20 text-primary px-1 py-0.5 rounded">
+                                                      {part.value.split('\n').filter(Boolean).map((line, j) => (
+                                                        <div key={j}>+ {line}</div>
+                                                      ))}
+                                                    </div>
+                                                  );
+                                                }
+                                                if (!part.removed) {
+                                                  return (
+                                                    <div key={i} className="text-muted-foreground">
+                                                      {part.value.split('\n').filter(Boolean).map((line, j) => (
+                                                        <div key={j}>{line}</div>
+                                                      ))}
+                                                    </div>
+                                                  );
+                                                }
+                                                return null;
+                                              })}
+                                            </div>
+                                          </div>
+                                        </>
+                                      );
+                                    })()}
+                                  </div>
+                                  <div className="p-2 bg-muted/50 border-t">
+                                    <div className="text-xs text-muted-foreground space-y-1">
+                                      <div><strong>Description:</strong></div>
+                                      <div className="grid grid-cols-2 gap-2">
+                                        <div className="text-destructive">
+                                          {filterPresets?.find(p => p.name === preset.name)?.description || <span className="text-muted-foreground italic">None</span>}
+                                        </div>
+                                        <div className="text-primary">
+                                          {preset.description || <span className="text-muted-foreground italic">None</span>}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </CollapsibleContent>
+                            </Collapsible>
+                          </>
                         )}
                       </div>
                     );
