@@ -146,6 +146,51 @@ export type Database = {
         }
         Relationships: []
       }
+      notification_preferences: {
+        Row: {
+          created_at: string
+          email_duplicate_detected: boolean
+          email_transcription_complete: boolean
+          email_transcription_failed: boolean
+          email_weekly_summary: boolean
+          id: string
+          inapp_duplicate_detected: boolean
+          inapp_system_updates: boolean
+          inapp_transcription_complete: boolean
+          inapp_transcription_failed: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          email_duplicate_detected?: boolean
+          email_transcription_complete?: boolean
+          email_transcription_failed?: boolean
+          email_weekly_summary?: boolean
+          id?: string
+          inapp_duplicate_detected?: boolean
+          inapp_system_updates?: boolean
+          inapp_transcription_complete?: boolean
+          inapp_transcription_failed?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          email_duplicate_detected?: boolean
+          email_transcription_complete?: boolean
+          email_transcription_failed?: boolean
+          email_weekly_summary?: boolean
+          id?: string
+          inapp_duplicate_detected?: boolean
+          inapp_system_updates?: boolean
+          inapp_transcription_complete?: boolean
+          inapp_transcription_failed?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       preset_comments: {
         Row: {
           comment: string

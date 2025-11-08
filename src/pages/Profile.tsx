@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2, User, Upload, X } from "lucide-react";
+import { ArrowLeft, Loader2, User, Upload, X, Bell } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 const Profile = () => {
@@ -300,6 +300,14 @@ const Profile = () => {
                   ) : (
                     "Save Changes"
                   )}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => navigate("/notifications")}
+                >
+                  <Bell className="h-4 w-4 mr-2" />
+                  Notifications
                 </Button>
                 <Button
                   type="button"
