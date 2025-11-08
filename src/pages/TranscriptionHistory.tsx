@@ -1278,14 +1278,29 @@ export default function TranscriptionHistory() {
       { name: 'Failed', value: failedCount, color: '#ef4444' },
     ].filter(item => item.value > 0);
 
+    // Tag statistics
+    const tagStats = tags.map(tag => {
+      const count = logs.filter(log => 
+        log.tags && log.tags.some(t => t.id === tag.id)
+      ).length;
+      return {
+        name: tag.name,
+        count,
+        color: tag.color,
+        id: tag.id
+      };
+    }).filter(stat => stat.count > 0)
+      .sort((a, b) => b.count - a.count);
+
     return {
       successRateOverTime,
       hourlyActivity,
       weeklyActivity,
       sizeRanges: sizeRanges.filter(r => r.count > 0),
       statusDistribution,
+      tagStats,
     };
-  }, [logs, completedCount, processingCount, failedCount]);
+  }, [logs, completedCount, processingCount, failedCount, tags]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -1498,6 +1513,96 @@ export default function TranscriptionHistory() {
                   </ResponsiveContainer>
                 </CardContent>
               </Card>
+
+              {/* Tag Statistics */}
+              {analyticsData.tagStats.length > 0 && (
+                <>
+                  <Card className="lg:col-span-2">
+                    <CardHeader>
+                      <CardTitle className="text-sm font-medium">Transcriptions by Tag</CardTitle>
+                      <CardDescription className="text-xs">Distribution of transcriptions across tags</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <ResponsiveContainer width="100%" height={250}>
+                        <BarChart data={analyticsData.tagStats}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis 
+                            dataKey="name" 
+                            tick={{ fontSize: 12 }}
+                            angle={-45}
+                            textAnchor="end"
+                            height={80}
+                          />
+                          <YAxis tick={{ fontSize: 12 }} />
+                          <Tooltip 
+                            contentStyle={{ 
+                              backgroundColor: 'hsl(var(--card))', 
+                              borderColor: 'hsl(var(--border))' 
+                            }}
+                          />
+                          <Bar dataKey="count" name="Transcriptions">
+                            {analyticsData.tagStats.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={entry.color} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-sm font-medium">Tag Distribution</CardTitle>
+                      <CardDescription className="text-xs">Percentage breakdown by tag</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <ResponsiveContainer width="100%" height={250}>
+                        <PieChart>
+                          <Pie
+                            data={analyticsData.tagStats}
+                            cx="50%"
+                            cy="50%"
+                            labelLine={false}
+                            label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                            outerRadius={80}
+                            fill="#8884d8"
+                            dataKey="count"
+                          >
+                            {analyticsData.tagStats.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={entry.color} />
+                            ))}
+                          </Pie>
+                          <Tooltip 
+                            contentStyle={{ 
+                              backgroundColor: 'hsl(var(--card))', 
+                              borderColor: 'hsl(var(--border))' 
+                            }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                      <div className="mt-4 space-y-2">
+                        {analyticsData.tagStats.slice(0, 5).map((tag) => (
+                          <div key={tag.id} className="flex items-center justify-between text-sm">
+                            <div className="flex items-center gap-2">
+                              <div
+                                className="w-3 h-3 rounded"
+                                style={{ backgroundColor: tag.color }}
+                              />
+                              <span>{tag.name}</span>
+                            </div>
+                            <span className="font-medium">{tag.count}</span>
+                          </div>
+                        ))}
+                        {analyticsData.tagStats.length > 5 && (
+                          <p className="text-xs text-muted-foreground text-center pt-2">
+                            +{analyticsData.tagStats.length - 5} more tag{analyticsData.tagStats.length - 5 !== 1 ? 's' : ''}
+                          </p>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </>
+              )}
             </div>
           </div>
         )}
