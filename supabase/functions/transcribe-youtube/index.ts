@@ -2,7 +2,6 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.80.0";
 import { Resend } from "https://esm.sh/resend@2.0.0";
-import { Innertube } from "https://esm.sh/youtubei.js@10.5.0/web";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -378,49 +377,41 @@ async function getYouTubeContent(
     return { text: transcript, title, method: "transcript_api", language };
   }
 
-  // If no transcript available, download audio and use Whisper
-  console.log("No captions available - will download audio and transcribe with Whisper");
+  // If no transcript available, use third-party audio extraction service
+  console.log("No captions available - attempting audio download");
   
   try {
     if (updateProgress) {
-      await updateProgress('downloading', 10, 'Initializing YouTube client...');
+      await updateProgress('downloading', 10, 'Fetching audio stream URL...');
     }
 
-    console.log("Initializing YouTube client...");
-    const youtube = await Innertube.create();
+    // Use a third-party API to get the audio URL
+    // Note: This requires the video to be publicly accessible
+    const audioApiUrl = `https://www.yt-download.org/api/json/info?url=https://www.youtube.com/watch?v=${videoId}`;
+    
+    console.log("Fetching audio URL from:", audioApiUrl);
+    const audioInfoResponse = await fetch(audioApiUrl);
+    
+    if (!audioInfoResponse.ok) {
+      throw new Error(`Failed to get audio info: ${audioInfoResponse.status}`);
+    }
+
+    const audioInfo = await audioInfoResponse.json();
+    
+    if (!audioInfo.url) {
+      throw new Error("No audio URL available from download service");
+    }
+
+    console.log("Got audio URL, downloading...");
     
     if (updateProgress) {
-      await updateProgress('downloading', 20, 'Fetching video information...');
+      await updateProgress('downloading', 30, 'Downloading audio file...');
     }
 
-    console.log("Getting video info for ID:", videoId);
-    const videoInfo = await youtube.getInfo(videoId);
-    
-    if (updateProgress) {
-      await updateProgress('downloading', 30, 'Finding audio stream...');
-    }
-    
-    // Get the best audio format
-    const audioFormat = videoInfo.chooseFormat({ type: 'audio', quality: 'best' });
-    
-    if (!audioFormat) {
-      throw new Error("Could not find audio stream for this video");
-    }
-
-    console.log("Found audio format:", audioFormat.mime_type, "bitrate:", audioFormat.bitrate);
-    
-    if (updateProgress) {
-      await updateProgress('downloading', 40, 'Downloading audio stream...');
-    }
-
-    // Get the decipher function and audio URL
-    const audioUrl = audioFormat.decipher(youtube.session.player);
-    console.log("Downloading audio from stream...");
-    
-    const audioResponse = await fetch(audioUrl);
+    const audioResponse = await fetch(audioInfo.url);
     
     if (!audioResponse.ok) {
-      throw new Error(`Failed to download audio: ${audioResponse.status} ${audioResponse.statusText}`);
+      throw new Error(`Failed to download audio: ${audioResponse.status}`);
     }
 
     const audioArrayBuffer = await audioResponse.arrayBuffer();
