@@ -1,6 +1,10 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { format, getDay, getHours } from "date-fns";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Download, FileSpreadsheet } from "lucide-react";
+import html2canvas from "html2canvas";
+import { toast } from "sonner";
 
 interface Tag {
   id: string;
@@ -23,6 +27,8 @@ const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
 export default function TagUsageHeatmap({ logs, selectedTags = [] }: TagUsageHeatmapProps) {
+  const heatmapRef = useRef<HTMLDivElement>(null);
+
   const heatmapData = useMemo(() => {
     // Initialize matrix: [day][hour] = count
     const matrix: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0));
@@ -64,19 +70,105 @@ export default function TagUsageHeatmap({ logs, selectedTags = [] }: TagUsageHea
 
   const totalUsage = heatmapData.flat().reduce((sum, val) => sum + val, 0);
 
+  const handleExportCSV = () => {
+    try {
+      // Create CSV headers
+      const headers = ['Day/Hour', ...HOURS.map(h => `${h}:00`)].join(',');
+      
+      // Create CSV rows
+      const rows = DAYS.map((day, dayIndex) => {
+        const rowData = [day, ...heatmapData[dayIndex]];
+        return rowData.join(',');
+      });
+
+      // Combine headers and rows
+      const csvContent = [headers, ...rows].join('\n');
+
+      // Create blob and download
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `tag_usage_heatmap_${new Date().toISOString().split('T')[0]}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+
+      toast.success('Heatmap data exported to CSV');
+    } catch (error) {
+      console.error('Error exporting CSV:', error);
+      toast.error('Failed to export CSV');
+    }
+  };
+
+  const handleExportPNG = async () => {
+    if (!heatmapRef.current) return;
+
+    try {
+      toast.info('Generating image...');
+      
+      const canvas = await html2canvas(heatmapRef.current, {
+        backgroundColor: '#ffffff',
+        scale: 2, // Higher quality
+      });
+
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          toast.error('Failed to generate image');
+          return;
+        }
+
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `tag_usage_heatmap_${new Date().toISOString().split('T')[0]}.png`;
+        link.click();
+        URL.revokeObjectURL(url);
+
+        toast.success('Heatmap exported as PNG');
+      });
+    } catch (error) {
+      console.error('Error exporting PNG:', error);
+      toast.error('Failed to export image');
+    }
+  };
+
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Tag Usage Heatmap</CardTitle>
-        <CardDescription>
-          {selectedTags.length > 0 
-            ? `Showing usage for ${selectedTags.length} selected tag${selectedTags.length > 1 ? 's' : ''}`
-            : 'Showing all tag usage'
-          } • Total: {totalUsage} tag{totalUsage !== 1 ? 's' : ''}
-        </CardDescription>
+        <div className="flex items-start justify-between">
+          <div>
+            <CardTitle>Tag Usage Heatmap</CardTitle>
+            <CardDescription>
+              {selectedTags.length > 0 
+                ? `Showing usage for ${selectedTags.length} selected tag${selectedTags.length > 1 ? 's' : ''}`
+                : 'Showing all tag usage'
+              } • Total: {totalUsage} tag{totalUsage !== 1 ? 's' : ''}
+            </CardDescription>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportCSV}
+              title="Export as CSV"
+            >
+              <FileSpreadsheet className="h-4 w-4 mr-2" />
+              CSV
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportPNG}
+              title="Export as PNG"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              PNG
+            </Button>
+          </div>
+        </div>
       </CardHeader>
       <CardContent>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" ref={heatmapRef}>
           <div className="inline-block min-w-full">
             <div className="flex gap-1">
               {/* Day labels */}
