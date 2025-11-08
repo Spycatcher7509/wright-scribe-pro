@@ -37,6 +37,7 @@ import { Loader2, FileText, Check, X, Shield, ShieldOff, Trash2, Keyboard, Searc
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { formatDistanceToNow, format } from "date-fns";
 import { toast } from "sonner";
+import { exportToJSON } from "@/lib/exportUtils";
 
 interface DuplicateCleanupPreviewProps {
   keepLatest: boolean;
@@ -1129,6 +1130,22 @@ export function DuplicateCleanupPreview({
     setSelectedBackups(new Set());
   };
 
+  const exportBackup = (backup: any) => {
+    const exportData = {
+      id: backup.id,
+      preset_name: backup.preset_name,
+      preset_description: backup.preset_description,
+      preset_filter_data: backup.preset_filter_data,
+      backup_reason: backup.backup_reason,
+      backed_up_at: backup.backed_up_at,
+      original_preset_id: backup.original_preset_id,
+    };
+    
+    const filename = `backup-${backup.preset_name.replace(/\s+/g, '-')}-${new Date(backup.backed_up_at).toISOString().split('T')[0]}.json`;
+    exportToJSON([exportData], filename);
+    toast.success("Backup exported successfully");
+  };
+
   const exportAllPresets = async () => {
     if (!filterPresets || filterPresets.length === 0) {
       toast.error("No presets to export");
@@ -2174,6 +2191,14 @@ export function DuplicateCleanupPreview({
                             <RotateCcw className="h-3 w-3 mr-2" />
                           )}
                           Restore
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => exportBackup(backup)}
+                        >
+                          <Download className="h-3 w-3 mr-2" />
+                          Export
                         </Button>
                         <Button
                           variant="ghost"
