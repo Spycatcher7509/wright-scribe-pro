@@ -9,6 +9,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
@@ -32,7 +33,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Loader2, FileText, Check, X, Shield, ShieldOff, Trash2, Keyboard, Search, Filter, CalendarIcon, Save, Star, StarOff, Download, Upload, FolderDown, AlertTriangle, History, RotateCcw, GitCompare, Merge } from "lucide-react";
+import { Loader2, FileText, Check, X, Shield, ShieldOff, Trash2, Keyboard, Search, Filter, CalendarIcon, Save, Star, StarOff, Download, Upload, FolderDown, AlertTriangle, History, RotateCcw, GitCompare, Merge, Settings, Trash } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { formatDistanceToNow, format } from "date-fns";
 import { toast } from "sonner";
@@ -85,6 +86,33 @@ export function DuplicateCleanupPreview({
   const [searchMergeStrategy, setSearchMergeStrategy] = useState<"combine" | "first" | "last">("combine");
   const [filterTypeMergeStrategy, setFilterTypeMergeStrategy] = useState<"first" | "last" | "strict">("first");
   const [dateMergeStrategy, setDateMergeStrategy] = useState<"earliest" | "latest" | "first" | "last">("earliest");
+  const [showRetentionSettings, setShowRetentionSettings] = useState(false);
+  const [retentionDays, setRetentionDays] = useState(30);
+  const [autoCleanupEnabled, setAutoCleanupEnabled] = useState(true);
+  
+  // Fetch retention settings
+  const { data: retentionSettings } = useQuery({
+    queryKey: ["backup-retention-settings"],
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      const { data, error } = await supabase
+        .from("backup_retention_settings")
+        .select("*")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (error && error.code !== 'PGRST116') throw error;
+      
+      if (data) {
+        setRetentionDays(data.retention_days);
+        setAutoCleanupEnabled(data.auto_cleanup_enabled);
+      }
+      
+      return data;
+    },
+  });
   
   // Fetch preset backups
   const { data: presetBackups } = useQuery({
@@ -900,6 +928,44 @@ export function DuplicateCleanupPreview({
     },
     onError: (error: any) => {
       toast.error("Failed to save merged preset: " + error.message);
+    },
+  });
+
+  const saveRetentionSettings = useMutation({
+    mutationFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      const { error } = await supabase
+        .from("backup_retention_settings")
+        .upsert({
+          user_id: user.id,
+          retention_days: retentionDays,
+          auto_cleanup_enabled: autoCleanupEnabled,
+        });
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["backup-retention-settings"] });
+      toast.success("Retention settings saved");
+    },
+    onError: (error: any) => {
+      toast.error("Failed to save settings: " + error.message);
+    },
+  });
+
+  const manualCleanup = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.functions.invoke('cleanup-old-backups');
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["preset-backups"] });
+      toast.success("Manual cleanup completed");
+    },
+    onError: (error: any) => {
+      toast.error("Failed to run cleanup: " + error.message);
     },
   });
 
@@ -1970,6 +2036,83 @@ export function DuplicateCleanupPreview({
               )}
             </div>
           </ScrollArea>
+          
+          <div className="border-t pt-4">
+            <Collapsible open={showRetentionSettings} onOpenChange={setShowRetentionSettings}>
+              <CollapsibleTrigger asChild>
+                <Button variant="outline" size="sm" className="w-full">
+                  <Settings className="h-4 w-4 mr-2" />
+                  Backup Retention Settings
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="mt-4 space-y-4">
+                <div className="p-4 bg-muted/50 rounded-lg border space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-1">
+                      <Label className="text-sm font-medium">Auto-cleanup</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Automatically delete old backups after retention period
+                      </p>
+                    </div>
+                    <Switch
+                      checked={autoCleanupEnabled}
+                      onCheckedChange={setAutoCleanupEnabled}
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="retention-days" className="text-sm">
+                      Keep backups for (days)
+                    </Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="retention-days"
+                        type="number"
+                        min="1"
+                        max="365"
+                        value={retentionDays}
+                        onChange={(e) => setRetentionDays(parseInt(e.target.value) || 30)}
+                        className="max-w-[120px]"
+                      />
+                      <span className="text-sm text-muted-foreground self-center">
+                        days
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Backups older than {retentionDays} days will be automatically deleted
+                    </p>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => saveRetentionSettings.mutate()}
+                      disabled={saveRetentionSettings.isPending}
+                    >
+                      {saveRetentionSettings.isPending && (
+                        <Loader2 className="h-3 w-3 mr-2 animate-spin" />
+                      )}
+                      Save Settings
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => manualCleanup.mutate()}
+                      disabled={manualCleanup.isPending}
+                    >
+                      {manualCleanup.isPending ? (
+                        <Loader2 className="h-3 w-3 mr-2 animate-spin" />
+                      ) : (
+                        <Trash className="h-3 w-3 mr-2" />
+                      )}
+                      Run Cleanup Now
+                    </Button>
+                  </div>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          </div>
+          
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowBackupsDialog(false)}>
               Close

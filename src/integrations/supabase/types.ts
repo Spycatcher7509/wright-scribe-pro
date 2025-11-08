@@ -80,6 +80,33 @@ export type Database = {
         }
         Relationships: []
       }
+      backup_retention_settings: {
+        Row: {
+          auto_cleanup_enabled: boolean
+          created_at: string
+          id: string
+          retention_days: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          auto_cleanup_enabled?: boolean
+          created_at?: string
+          id?: string
+          retention_days?: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          auto_cleanup_enabled?: boolean
+          created_at?: string
+          id?: string
+          retention_days?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       duplicate_cleanup_config: {
         Row: {
           created_at: string
