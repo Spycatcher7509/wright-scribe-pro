@@ -15,6 +15,7 @@ import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Cart
 import { diffWords } from 'diff';
 import TagUsageHeatmap from "@/components/TagUsageHeatmap";
 import TagUsageStatistics from "@/components/TagUsageStatistics";
+import TagTemplateManager from "@/components/TagTemplateManager";
 import TagTemplatesManager from "@/components/TagTemplatesManager";
 
 // Color palette themes for tags
@@ -115,6 +116,13 @@ interface TagCategory {
   user_id: string;
   created_at: string;
   updated_at: string;
+}
+
+interface TagTemplate {
+  id: string;
+  name: string;
+  description?: string;
+  tags: Tag[];
 }
 
 type SortField = 'file_title' | 'status' | 'created_at';
@@ -225,6 +233,7 @@ export default function TranscriptionHistory() {
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newCategoryColor, setNewCategoryColor] = useState('#6b7280');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string | null>(null);
+  const [tagTemplates, setTagTemplates] = useState<TagTemplate[]>([]);
 
   // Save filter preferences whenever they change
   useEffect(() => {
@@ -277,11 +286,37 @@ export default function TranscriptionHistory() {
     }
   };
 
+  // Fetch tag templates
+  const fetchTemplates = async () => {
+    const { data, error } = await supabase
+      .from("tag_templates")
+      .select(`
+        *,
+        template_tags (
+          tag_id,
+          tags (*)
+        )
+      `)
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.error("Error fetching templates:", error);
+    } else {
+      // Transform the data to include tags
+      const templatesWithTags = data?.map(template => ({
+        ...template,
+        tags: template.template_tags?.map((tt: any) => tt.tags).filter(Boolean) || []
+      })) || [];
+      setTagTemplates(templatesWithTags);
+    }
+  };
+
   useEffect(() => {
     checkAuth();
     fetchLogs();
     fetchTags();
     fetchCategories();
+    fetchTemplates();
 
     // Set up realtime subscription
     const channel = supabase
@@ -373,10 +408,44 @@ export default function TranscriptionHistory() {
       )
       .subscribe();
 
+    // Set up realtime subscription for tag templates
+    const templatesChannel = supabase
+      .channel('tag-templates-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'tag_templates'
+        },
+        () => {
+          fetchTemplates();
+        }
+      )
+      .subscribe();
+
+    // Set up realtime subscription for template tags
+    const templateTagsChannel = supabase
+      .channel('template-tags-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'template_tags'
+        },
+        () => {
+          fetchTemplates();
+        }
+      )
+      .subscribe();
+
     return () => {
       supabase.removeChannel(channel);
       supabase.removeChannel(tagsChannel);
       supabase.removeChannel(transcriptionTagsChannel);
+      supabase.removeChannel(templatesChannel);
+      supabase.removeChannel(templateTagsChannel);
     };
   }, []);
 
@@ -3056,8 +3125,10 @@ export default function TranscriptionHistory() {
           {tagDialogMode === 'manage' ? (
             <div className="space-y-4">
               {/* Tag Templates Section */}
-              <TagTemplatesManager 
+              <TagTemplateManager 
                 tags={tags}
+                templates={tagTemplates}
+                onTemplatesChange={fetchTemplates}
                 onApplyTemplate={(templateTags) => {
                   if (assignTagsToLog) {
                     handleApplyTagsToLog(assignTagsToLog, templateTags.map(t => t.id));
