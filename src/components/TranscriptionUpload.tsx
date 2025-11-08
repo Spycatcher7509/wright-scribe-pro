@@ -838,11 +838,12 @@ export function TranscriptionUpload() {
     
     const errorMessage = lastError?.message || "Failed to transcribe YouTube video";
     const isCaptionError = errorMessage.includes('does not have captions') || 
-                          errorMessage.includes('subtitles available');
+                          errorMessage.includes('subtitles available') ||
+                          errorMessage.includes('NO_CAPTIONS_AVAILABLE');
     
     if (isCaptionError) {
-      toast.error("⚠️ This video doesn't have captions. Please check caption availability first or try a different video.", {
-        duration: 6000,
+      toast.error("This video doesn't have captions/subtitles available. Please use the search feature to find videos with captions, or download the audio and upload it as a file.", {
+        duration: 8000,
       });
     } else {
       toast.error(errorMessage + " after multiple attempts");
@@ -1436,12 +1437,16 @@ export function TranscriptionUpload() {
                       <AlertDescription className="text-yellow-700 dark:text-yellow-300">
                         <div className="flex items-start justify-between">
                           <div>
-                            <strong className="font-semibold">⚠️ No Captions Available</strong>
+                            <strong className="font-semibold">No Captions Available</strong>
                             <p className="text-sm mt-1">{captionStatus.message}</p>
                             <p className="text-xs mt-2 opacity-90">
-                              This video cannot be transcribed because it doesn't have captions or subtitles. 
-                              Please try a different video that has captions enabled, or use the YouTube search feature to find videos with captions.
+                              <strong>Options:</strong>
                             </p>
+                            <ul className="text-xs mt-1 space-y-1 ml-4 list-disc">
+                              <li>Use the search feature above to find videos with captions</li>
+                              <li>Download the video's audio manually and upload it using the "Upload File" tab</li>
+                              <li>Try a different video that has captions enabled</li>
+                            </ul>
                           </div>
                           <XCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 ml-2" />
                         </div>
