@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "sonner";
-import { Upload, FileAudio, Loader2, Youtube, AlertTriangle, Shield, Eye, History, CheckCircle2, XCircle, Subtitles, AlertCircle } from "lucide-react";
+import { Upload, FileAudio, Loader2, Youtube, AlertTriangle, Shield, Eye, History, CheckCircle2, XCircle, Subtitles, AlertCircle, Search, ExternalLink } from "lucide-react";
 import { calculateFileChecksum } from "@/lib/checksumUtils";
 import { format } from "date-fns";
 
@@ -51,6 +51,11 @@ export function TranscriptionUpload() {
     lines: string[];
   }>({ isLoading: false, text: null, lines: [] });
   const [showPreview, setShowPreview] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchLanguage, setSearchLanguage] = useState("");
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -297,6 +302,51 @@ export function TranscriptionUpload() {
     }
   };
 
+  const handleSearchYouTube = async () => {
+    if (!searchQuery.trim()) {
+      toast.error("Please enter a search query");
+      return;
+    }
+
+    setIsSearching(true);
+    setSearchResults([]);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('search-youtube', {
+        body: {
+          query: searchQuery,
+          language: searchLanguage || undefined,
+          maxResults: 10
+        }
+      });
+
+      if (error) throw error;
+      if (data.error) throw new Error(data.error);
+
+      setSearchResults(data.results || []);
+      
+      if (data.results.length === 0) {
+        toast.info("No videos found with captions matching your criteria");
+      } else {
+        toast.success(`Found ${data.results.length} videos with captions`);
+      }
+    } catch (error: any) {
+      console.error("Search error:", error);
+      toast.error(error.message || "Failed to search YouTube videos");
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSelectSearchResult = (videoUrl: string) => {
+    setYoutubeUrl(videoUrl);
+    setShowSearch(false);
+    setSearchResults([]);
+    setSearchQuery("");
+    checkCaptionAvailability(videoUrl);
+    toast.success("Video selected - checking captions...");
+  };
+
   const handleYouTubeUrlChange = (url: string) => {
     setYoutubeUrl(url);
     setCaptionStatus({ checking: false, available: null });
@@ -456,6 +506,10 @@ export function TranscriptionUpload() {
     setSelectedLanguage("en");
     setCaptionPreview({ isLoading: false, text: null, lines: [] });
     setShowPreview(false);
+    setShowSearch(false);
+    setSearchResults([]);
+    setSearchQuery("");
+    setSearchLanguage("");
   };
 
   const handleUseCachedResult = (log: any) => {
@@ -699,6 +753,118 @@ export function TranscriptionUpload() {
             </TabsContent>
 
             <TabsContent value="youtube" className="space-y-4">
+              {/* YouTube Search Feature */}
+              <div className="space-y-3 pb-4 border-b">
+                <div className="flex items-center justify-between">
+                  <Label className="text-base font-semibold">Search YouTube Videos</Label>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowSearch(!showSearch)}
+                  >
+                    {showSearch ? 'Hide Search' : 'Show Search'}
+                  </Button>
+                </div>
+
+                {showSearch && (
+                  <div className="space-y-3 p-4 bg-muted/50 rounded-lg">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="md:col-span-2 space-y-2">
+                        <Label htmlFor="search-query">Search Query</Label>
+                        <Input
+                          id="search-query"
+                          type="text"
+                          placeholder="e.g., React tutorial, cooking recipes..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleSearchYouTube()}
+                          disabled={isSearching}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="search-language">Caption Language (Optional)</Label>
+                        <Select value={searchLanguage} onValueChange={setSearchLanguage} disabled={isSearching}>
+                          <SelectTrigger id="search-language">
+                            <SelectValue placeholder="Any language" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="">Any language</SelectItem>
+                            <SelectItem value="en">English</SelectItem>
+                            <SelectItem value="es">Spanish</SelectItem>
+                            <SelectItem value="fr">French</SelectItem>
+                            <SelectItem value="de">German</SelectItem>
+                            <SelectItem value="it">Italian</SelectItem>
+                            <SelectItem value="pt">Portuguese</SelectItem>
+                            <SelectItem value="ja">Japanese</SelectItem>
+                            <SelectItem value="ko">Korean</SelectItem>
+                            <SelectItem value="zh">Chinese</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <Button
+                      onClick={handleSearchYouTube}
+                      disabled={!searchQuery.trim() || isSearching}
+                      className="w-full"
+                    >
+                      {isSearching ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Searching...
+                        </>
+                      ) : (
+                        <>
+                          <Search className="mr-2 h-4 w-4" />
+                          Search Videos with Captions
+                        </>
+                      )}
+                    </Button>
+
+                    {/* Search Results */}
+                    {searchResults.length > 0 && (
+                      <div className="space-y-3 mt-4">
+                        <Label className="text-sm font-semibold">Search Results ({searchResults.length})</Label>
+                        <div className="max-h-96 overflow-y-auto space-y-2">
+                          {searchResults.map((video) => (
+                            <Card key={video.videoId} className="hover:bg-accent/50 cursor-pointer transition-colors">
+                              <CardContent className="p-3" onClick={() => handleSelectSearchResult(video.url)}>
+                                <div className="flex gap-3">
+                                  <img 
+                                    src={video.thumbnail} 
+                                    alt={video.title}
+                                    className="w-32 h-20 object-cover rounded flex-shrink-0"
+                                  />
+                                  <div className="flex-1 min-w-0">
+                                    <h4 className="font-medium text-sm line-clamp-2 mb-1">{video.title}</h4>
+                                    <p className="text-xs text-muted-foreground mb-2">{video.channelTitle}</p>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <div className="flex items-center gap-1 text-xs">
+                                        <Subtitles className="h-3 w-3 text-green-600" />
+                                        <span className="text-green-600 font-medium">
+                                          {video.captions.languages.length} caption{video.captions.languages.length !== 1 ? 's' : ''}
+                                        </span>
+                                      </div>
+                                      {video.captions.hasRequestedLanguage && (
+                                        <div className="flex items-center gap-1 text-xs">
+                                          <CheckCircle2 className="h-3 w-3 text-blue-600" />
+                                          <span className="text-blue-600 font-medium">Target language</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <ExternalLink className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                                </div>
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="youtube-url">YouTube URL</Label>
                 <div className="flex gap-2">
@@ -721,7 +887,7 @@ export function TranscriptionUpload() {
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Paste a YouTube video URL to extract and transcribe the audio
+                  Paste a YouTube video URL or use the search feature above
                 </p>
               </div>
 
