@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Loader2, FileText, Check, X, Shield, ShieldOff, Trash2, Keyboard, Search, Filter, CalendarIcon, Save, Star, StarOff, Download, Upload, FolderDown, AlertTriangle, History, RotateCcw, GitCompare } from "lucide-react";
+import { Loader2, FileText, Check, X, Shield, ShieldOff, Trash2, Keyboard, Search, Filter, CalendarIcon, Save, Star, StarOff, Download, Upload, FolderDown, AlertTriangle, History, RotateCcw, GitCompare, Merge } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { formatDistanceToNow, format } from "date-fns";
 import { toast } from "sonner";
@@ -78,6 +78,13 @@ export function DuplicateCleanupPreview({
   const [conflictResolution, setConflictResolution] = useState<"skip" | "rename" | "overwrite">("rename");
   const [showBackupsDialog, setShowBackupsDialog] = useState(false);
   const [individualResolutions, setIndividualResolutions] = useState<Map<number, "skip" | "rename" | "overwrite">>(new Map());
+  const [showMergeDialog, setShowMergeDialog] = useState(false);
+  const [selectedPresetsForMerge, setSelectedPresetsForMerge] = useState<Set<string>>(new Set());
+  const [mergedPresetName, setMergedPresetName] = useState("");
+  const [mergedPresetDescription, setMergedPresetDescription] = useState("");
+  const [searchMergeStrategy, setSearchMergeStrategy] = useState<"combine" | "first" | "last">("combine");
+  const [filterTypeMergeStrategy, setFilterTypeMergeStrategy] = useState<"first" | "last" | "strict">("first");
+  const [dateMergeStrategy, setDateMergeStrategy] = useState<"earliest" | "latest" | "first" | "last">("earliest");
   
   // Fetch preset backups
   const { data: presetBackups } = useQuery({
@@ -794,6 +801,108 @@ export function DuplicateCleanupPreview({
     return diff;
   };
 
+  const togglePresetForMerge = (presetId: string) => {
+    setSelectedPresetsForMerge(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(presetId)) {
+        newSet.delete(presetId);
+      } else {
+        newSet.add(presetId);
+      }
+      return newSet;
+    });
+  };
+
+  const getMergedFilterData = () => {
+    if (!filterPresets || selectedPresetsForMerge.size === 0) return null;
+
+    const selectedPresets = filterPresets.filter(p => selectedPresetsForMerge.has(p.id));
+    
+    // Merge search queries
+    let mergedSearchQuery = "";
+    if (searchMergeStrategy === "combine") {
+      const queries = selectedPresets
+        .map(p => (p.filter_data as any)?.searchQuery)
+        .filter(Boolean);
+      mergedSearchQuery = queries.join(" ");
+    } else if (searchMergeStrategy === "first") {
+      mergedSearchQuery = (selectedPresets[0]?.filter_data as any)?.searchQuery || "";
+    } else if (searchMergeStrategy === "last") {
+      mergedSearchQuery = (selectedPresets[selectedPresets.length - 1]?.filter_data as any)?.searchQuery || "";
+    }
+
+    // Merge filter types
+    let mergedFilterType = "all";
+    if (filterTypeMergeStrategy === "first") {
+      mergedFilterType = (selectedPresets[0]?.filter_data as any)?.filterType || "all";
+    } else if (filterTypeMergeStrategy === "last") {
+      mergedFilterType = (selectedPresets[selectedPresets.length - 1]?.filter_data as any)?.filterType || "all";
+    } else if (filterTypeMergeStrategy === "strict") {
+      // Use the most restrictive (non-"all") filter type
+      const types = selectedPresets
+        .map(p => (p.filter_data as any)?.filterType)
+        .filter(t => t && t !== "all");
+      mergedFilterType = types.length > 0 ? types[0] : "all";
+    }
+
+    // Merge dates
+    let mergedDate = undefined;
+    const dates = selectedPresets
+      .map(p => (p.filter_data as any)?.filterDate ? new Date((p.filter_data as any).filterDate) : null)
+      .filter(Boolean) as Date[];
+    
+    if (dates.length > 0) {
+      if (dateMergeStrategy === "earliest") {
+        mergedDate = new Date(Math.min(...dates.map(d => d.getTime())));
+      } else if (dateMergeStrategy === "latest") {
+        mergedDate = new Date(Math.max(...dates.map(d => d.getTime())));
+      } else if (dateMergeStrategy === "first") {
+        mergedDate = (selectedPresets[0]?.filter_data as any)?.filterDate ? new Date((selectedPresets[0].filter_data as any).filterDate) : undefined;
+      } else if (dateMergeStrategy === "last") {
+        const lastPreset = selectedPresets[selectedPresets.length - 1];
+        mergedDate = (lastPreset?.filter_data as any)?.filterDate ? new Date((lastPreset.filter_data as any).filterDate) : undefined;
+      }
+    }
+
+    return {
+      searchQuery: mergedSearchQuery,
+      filterType: mergedFilterType,
+      filterDate: mergedDate?.toISOString(),
+    };
+  };
+
+  const saveMergedPreset = useMutation({
+    mutationFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      const mergedData = getMergedFilterData();
+      if (!mergedData) throw new Error("No presets selected for merge");
+
+      const { error } = await supabase
+        .from("filter_presets")
+        .insert({
+          user_id: user.id,
+          name: mergedPresetName,
+          description: mergedPresetDescription,
+          filter_data: mergedData,
+        });
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["cleanup-filter-presets"] });
+      setShowMergeDialog(false);
+      setSelectedPresetsForMerge(new Set());
+      setMergedPresetName("");
+      setMergedPresetDescription("");
+      toast.success("Merged preset saved");
+    },
+    onError: (error: any) => {
+      toast.error("Failed to save merged preset: " + error.message);
+    },
+  });
+
   const restoreFromBackup = useMutation({
     mutationFn: async (backup: any) => {
       const { data: { user } } = await supabase.auth.getUser();
@@ -1135,6 +1244,16 @@ export function DuplicateCleanupPreview({
                 title="View preset backups"
               >
                 <History className="h-4 w-4" />
+              </Button>
+            )}
+            {filterPresets && filterPresets.length >= 2 && (
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => setShowMergeDialog(true)}
+                title="Merge multiple presets"
+              >
+                <Merge className="h-4 w-4" />
               </Button>
             )}
           </div>
@@ -1854,6 +1973,172 @@ export function DuplicateCleanupPreview({
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowBackupsDialog(false)}>
               Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showMergeDialog} onOpenChange={setShowMergeDialog}>
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Merge className="h-5 w-5" />
+              Merge Presets
+            </DialogTitle>
+            <DialogDescription>
+              Combine multiple filter presets into one unified preset
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 flex-1 overflow-hidden flex flex-col">
+            <div className="flex-1 overflow-hidden flex flex-col">
+              <Label className="mb-2">Select Presets to Merge (minimum 2):</Label>
+              <ScrollArea className="border rounded-lg flex-1">
+                <div className="p-4 space-y-2">
+                  {filterPresets && filterPresets.length > 0 ? (
+                    filterPresets.map((preset) => (
+                      <div
+                        key={preset.id}
+                        className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                          selectedPresetsForMerge.has(preset.id)
+                            ? 'bg-primary/10 border-primary'
+                            : 'bg-card hover:bg-accent/50'
+                        }`}
+                        onClick={() => togglePresetForMerge(preset.id)}
+                      >
+                        <div className="flex items-start gap-3">
+                          <Checkbox
+                            checked={selectedPresetsForMerge.has(preset.id)}
+                            onCheckedChange={() => togglePresetForMerge(preset.id)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm">{preset.name}</div>
+                            {preset.description && (
+                              <p className="text-xs text-muted-foreground mt-1">
+                                {preset.description}
+                              </p>
+                            )}
+                            <div className="text-xs text-muted-foreground mt-2">
+                              {formatFilterDataForDisplay(preset.filter_data as any)}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-4 text-muted-foreground">
+                      No presets available
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
+
+            {selectedPresetsForMerge.size >= 2 && (
+              <div className="space-y-4 p-4 bg-muted/50 rounded-lg border">
+                <div>
+                  <Label className="text-sm font-medium">Merge Settings</Label>
+                  <p className="text-xs text-muted-foreground mt-1">Choose how to combine filter criteria</p>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="search-merge" className="text-xs">Search Query:</Label>
+                    <Select value={searchMergeStrategy} onValueChange={(v: any) => setSearchMergeStrategy(v)}>
+                      <SelectTrigger id="search-merge" className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="combine">Combine all</SelectItem>
+                        <SelectItem value="first">Use first</SelectItem>
+                        <SelectItem value="last">Use last</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="type-merge" className="text-xs">Filter Type:</Label>
+                    <Select value={filterTypeMergeStrategy} onValueChange={(v: any) => setFilterTypeMergeStrategy(v)}>
+                      <SelectTrigger id="type-merge" className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="first">Use first</SelectItem>
+                        <SelectItem value="last">Use last</SelectItem>
+                        <SelectItem value="strict">Most strict</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="date-merge" className="text-xs">Date Filter:</Label>
+                    <Select value={dateMergeStrategy} onValueChange={(v: any) => setDateMergeStrategy(v)}>
+                      <SelectTrigger id="date-merge" className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="earliest">Earliest</SelectItem>
+                        <SelectItem value="latest">Latest</SelectItem>
+                        <SelectItem value="first">Use first</SelectItem>
+                        <SelectItem value="last">Use last</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-background rounded-lg border">
+                  <div className="text-xs font-medium mb-2">Preview of Merged Preset:</div>
+                  <div className="text-xs text-muted-foreground whitespace-pre-line">
+                    {getMergedFilterData() ? formatFilterDataForDisplay(getMergedFilterData()!) : "No filters"}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="merged-name">Merged Preset Name</Label>
+                  <Input
+                    id="merged-name"
+                    placeholder="e.g., Combined Filters"
+                    value={mergedPresetName}
+                    onChange={(e) => setMergedPresetName(e.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="merged-description">Description (optional)</Label>
+                  <Input
+                    id="merged-description"
+                    placeholder="What does this merged preset do?"
+                    value={mergedPresetDescription}
+                    onChange={(e) => setMergedPresetDescription(e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
+
+            {selectedPresetsForMerge.size === 1 && (
+              <div className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-lg">
+                Please select at least one more preset to merge
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowMergeDialog(false);
+                setSelectedPresetsForMerge(new Set());
+                setMergedPresetName("");
+                setMergedPresetDescription("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => saveMergedPreset.mutate()}
+              disabled={selectedPresetsForMerge.size < 2 || !mergedPresetName.trim() || saveMergedPreset.isPending}
+            >
+              {saveMergedPreset.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Save Merged Preset
             </Button>
           </DialogFooter>
         </DialogContent>
