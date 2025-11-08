@@ -266,8 +266,42 @@ export default function TranscriptionHistory() {
       )
       .subscribe();
 
+    // Set up realtime subscription for tags
+    const tagsChannel = supabase
+      .channel('tags-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'tags'
+        },
+        () => {
+          fetchTags();
+        }
+      )
+      .subscribe();
+
+    // Set up realtime subscription for transcription_tags
+    const transcriptionTagsChannel = supabase
+      .channel('transcription-tags-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'transcription_tags'
+        },
+        () => {
+          fetchLogs();
+        }
+      )
+      .subscribe();
+
     return () => {
       supabase.removeChannel(channel);
+      supabase.removeChannel(tagsChannel);
+      supabase.removeChannel(transcriptionTagsChannel);
     };
   }, []);
 
@@ -910,6 +944,49 @@ export default function TranscriptionHistory() {
   const openManageTagsDialog = () => {
     setTagDialogMode('manage');
     setShowTagDialog(true);
+  };
+
+  // Tag assignment handlers
+  const handleAssignTag = async (transcriptionId: string, tagId: string) => {
+    const { error } = await supabase
+      .from("transcription_tags")
+      .insert([{ transcription_id: transcriptionId, tag_id: tagId }]);
+
+    if (error) {
+      if (error.code === '23505') { // Unique constraint violation
+        toast.error("Tag already assigned");
+      } else {
+        console.error("Error assigning tag:", error);
+        toast.error("Failed to assign tag");
+      }
+    } else {
+      toast.success("Tag assigned successfully");
+      fetchLogs();
+    }
+  };
+
+  const handleRemoveTag = async (transcriptionId: string, tagId: string) => {
+    const { error } = await supabase
+      .from("transcription_tags")
+      .delete()
+      .eq("transcription_id", transcriptionId)
+      .eq("tag_id", tagId);
+
+    if (error) {
+      console.error("Error removing tag:", error);
+      toast.error("Failed to remove tag");
+    } else {
+      toast.success("Tag removed successfully");
+      fetchLogs();
+    }
+  };
+
+  const openAssignTagsDialog = (log: TranscriptionLog) => {
+    setAssignTagsToLog(log);
+  };
+
+  const closeAssignTagsDialog = () => {
+    setAssignTagsToLog(null);
   };
 
   const handlePageSizeChange = (value: string) => {
@@ -1847,18 +1924,47 @@ export default function TranscriptionHistory() {
                             />
                           )}
                         </TableCell>
-                        {visibleColumns.fileTitle && (
-                          <TableCell className="font-medium">{log.file_title}</TableCell>
-                        )}
+                         {visibleColumns.fileTitle && (
+                          <TableCell>
+                            <div className="space-y-2">
+                              <div className="font-medium">{log.file_title}</div>
+                              {log.tags && log.tags.length > 0 && (
+                                <div className="flex flex-wrap gap-1">
+                                  {log.tags.map((tag) => (
+                                    <Badge
+                                      key={tag.id}
+                                      variant="outline"
+                                      className="text-xs"
+                                      style={{
+                                        borderColor: tag.color,
+                                        color: tag.color,
+                                      }}
+                                    >
+                                      {tag.name}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </TableCell>
+                         )}
                         {visibleColumns.status && (
                           <TableCell>{getStatusBadge(log.status)}</TableCell>
                         )}
                         {visibleColumns.created && (
                           <TableCell>{formatDate(log.created_at)}</TableCell>
                         )}
-                        {visibleColumns.actions && (
+                         {visibleColumns.actions && (
                           <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openAssignTagsDialog(log)}
+                              title="Manage tags"
+                            >
+                              <Tag className="h-4 w-4" />
+                            </Button>
                             <Button
                               variant="ghost"
                               size="sm"
@@ -1888,7 +1994,7 @@ export default function TranscriptionHistory() {
                             </Button>
                           </div>
                         </TableCell>
-                        )}
+                         )}
                       </TableRow>
                     ))
                   )}
@@ -2338,6 +2444,104 @@ export default function TranscriptionHistory() {
                   onClick={tagDialogMode === 'create' ? handleCreateTag : handleEditTag}
                 >
                   {tagDialogMode === 'create' ? 'Create Tag' : 'Save Changes'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Tag Assignment Dialog */}
+      <Dialog open={!!assignTagsToLog} onOpenChange={(open) => !open && closeAssignTagsDialog()}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Tag className="h-5 w-5" />
+              Manage Tags
+            </DialogTitle>
+            <DialogDescription>
+              Assign or remove tags for this transcription
+            </DialogDescription>
+          </DialogHeader>
+
+          {assignTagsToLog && (
+            <div className="space-y-4">
+              <div>
+                <Label className="text-sm font-semibold">Transcription</Label>
+                <p className="text-sm mt-1 text-muted-foreground">{assignTagsToLog.file_title}</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Assigned Tags</Label>
+                {assignTagsToLog.tags && assignTagsToLog.tags.length > 0 ? (
+                  <div className="space-y-2">
+                    {assignTagsToLog.tags.map((tag) => (
+                      <div
+                        key={tag.id}
+                        className="flex items-center justify-between p-2 border rounded-lg"
+                      >
+                        <div className="flex items-center gap-2">
+                          <div
+                            className="w-3 h-3 rounded"
+                            style={{ backgroundColor: tag.color }}
+                          />
+                          <span className="text-sm">{tag.name}</span>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRemoveTag(assignTagsToLog.id, tag.id)}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground py-2">No tags assigned</p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Available Tags</Label>
+                {tags.length > 0 ? (
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {tags
+                      .filter(tag => !assignTagsToLog.tags?.some(t => t.id === tag.id))
+                      .map((tag) => (
+                        <button
+                          key={tag.id}
+                          className="w-full flex items-center justify-between p-2 border rounded-lg hover:bg-muted/50 transition-colors text-left"
+                          onClick={() => handleAssignTag(assignTagsToLog.id, tag.id)}
+                        >
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="w-3 h-3 rounded"
+                              style={{ backgroundColor: tag.color }}
+                            />
+                            <span className="text-sm">{tag.name}</span>
+                          </div>
+                          <Plus className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                      ))}
+                    {tags.filter(tag => !assignTagsToLog.tags?.some(t => t.id === tag.id)).length === 0 && (
+                      <p className="text-sm text-muted-foreground py-2">All tags assigned</p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-4">
+                    <p className="text-sm text-muted-foreground mb-2">No tags available</p>
+                    <Button size="sm" variant="outline" onClick={openCreateTagDialog}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Create Tag
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end pt-4 border-t">
+                <Button onClick={closeAssignTagsDialog}>
+                  Done
                 </Button>
               </div>
             </div>
