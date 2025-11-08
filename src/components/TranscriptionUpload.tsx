@@ -70,7 +70,6 @@ export function TranscriptionUpload() {
     message: string;
   }>>([]);
   const [forceTranscribe, setForceTranscribe] = useState(false);
-  const [transcriptionMode, setTranscriptionMode] = useState<'caption-only' | 'always-audio'>('caption-only');
   
   // Extract video ID for progress tracking
   const extractVideoId = (url: string): string | null => {
@@ -727,10 +726,10 @@ export function TranscriptionUpload() {
       return;
     }
 
-    // Block transcription if captions aren't available AND user is in caption-only mode
-    if (captionStatus.available === false && transcriptionMode === 'caption-only' && !forceTranscribe) {
-      toast.error("⚠️ This video doesn't have captions/subtitles. Switch to 'Always Use Audio' mode or try a different video.", {
-        duration: 5000,
+    // Block transcription if captions aren't available
+    if (captionStatus.available === false && !forceTranscribe) {
+      toast.error("⚠️ This video doesn't have captions/subtitles. Please try a different video with captions, or download the audio and upload it as a file.", {
+        duration: 6000,
       });
       return;
     }
@@ -767,13 +766,6 @@ export function TranscriptionUpload() {
           setProgress((prev) => Math.min(prev + 10, 90));
         }, 500);
 
-        // If in always-audio mode, skip captions and go straight to audio transcription
-        if (transcriptionMode === 'always-audio') {
-          console.log("Always-audio mode - skipping captions, going straight to audio download");
-          clearInterval(progressInterval);
-          return await handleClientSideAudioTranscription(videoId, cleanUrl);
-        }
-
         const { data, error } = await supabase.functions.invoke("transcribe-youtube", {
           body: { 
             youtubeUrl: cleanUrl,
@@ -786,13 +778,9 @@ export function TranscriptionUpload() {
 
         if (error) throw error;
         
-        // Check if it's a NO_CAPTIONS_AVAILABLE error - fall back to audio download only if in caption-only mode
+        // Check if it's a NO_CAPTIONS_AVAILABLE error
         if (data.error && data.error === "NO_CAPTIONS_AVAILABLE") {
-          console.log("No captions available - falling back to client-side audio download");
-          clearInterval(progressInterval);
-          
-          // Download audio on client side and transcribe
-          return await handleClientSideAudioTranscription(videoId, cleanUrl);
+          throw new Error("NO_CAPTIONS_AVAILABLE");
         }
         
         if (data.error) throw new Error(data.error);
@@ -800,15 +788,6 @@ export function TranscriptionUpload() {
         setProgress(100);
         return data;
       } catch (error: any) {
-        // Check if this is the NO_CAPTIONS error
-        const errorMessage = error?.message || error || '';
-        if (errorMessage.includes('NO_CAPTIONS_AVAILABLE')) {
-          const videoIdMatch = youtubeUrl.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
-          if (videoIdMatch) {
-            return await handleClientSideAudioTranscription(videoIdMatch[1], youtubeUrl);
-          }
-        }
-        
         // Don't retry if video doesn't have captions - that won't change
         const isCaptionError = errorMessage.includes('does not have captions') || 
                               errorMessage.includes('subtitles available') ||
@@ -894,7 +873,6 @@ export function TranscriptionUpload() {
     setIsBulkProcessing(false);
     setBatchVideoIds([]);
     setForceTranscribe(false);
-    setTranscriptionMode('caption-only');
     setDebugLogs([]);
   };
 
@@ -1367,38 +1345,14 @@ export function TranscriptionUpload() {
                 </p>
               </div>
 
-              {/* Transcription Mode Toggle */}
-              <div className="space-y-3 p-4 bg-muted/30 rounded-lg border">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label className="text-sm font-semibold">Transcription Mode</Label>
-                    <p className="text-xs text-muted-foreground">
-                      {transcriptionMode === 'caption-only' 
-                        ? 'Fast & free - uses video captions only' 
-                        : 'Downloads audio and transcribes with AI (uses Whisper API)'}
-                    </p>
-                  </div>
-                  <Switch
-                    checked={transcriptionMode === 'always-audio'}
-                    onCheckedChange={(checked) => setTranscriptionMode(checked ? 'always-audio' : 'caption-only')}
-                    disabled={isProcessing}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className={`p-2 rounded ${transcriptionMode === 'caption-only' ? 'bg-primary/10 border border-primary/20' : 'bg-background'}`}>
-                    <div className="font-medium">Caption-Only Mode</div>
-                    <div className="text-muted-foreground mt-1">✓ Instant results</div>
-                    <div className="text-muted-foreground">✓ Free</div>
-                    <div className="text-muted-foreground">✗ Only works with videos that have captions</div>
-                  </div>
-                  <div className={`p-2 rounded ${transcriptionMode === 'always-audio' ? 'bg-primary/10 border border-primary/20' : 'bg-background'}`}>
-                    <div className="font-medium">Always-Use-Audio Mode</div>
-                    <div className="text-muted-foreground mt-1">✓ Works for all videos</div>
-                    <div className="text-muted-foreground">✗ Slower (downloads audio)</div>
-                    <div className="text-muted-foreground">✗ Costs Whisper API credits</div>
-                  </div>
-                </div>
-              </div>
+              {/* Caption-Only Notice */}
+              <Alert className="border-blue-500 bg-blue-50 dark:bg-blue-950">
+                <AlertCircle className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                <AlertDescription className="text-blue-700 dark:text-blue-300">
+                  <strong>YouTube Transcription:</strong> This feature only works with videos that have captions/subtitles enabled. 
+                  For videos without captions, download the audio manually and upload it using the "Upload File" tab above.
+                </AlertDescription>
+              </Alert>
                 
               {/* Debug Panel Toggle */}
               <Button
