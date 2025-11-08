@@ -29,7 +29,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Loader2, FileText, Check, X, Shield, ShieldOff, Trash2, Keyboard, Search, Filter, CalendarIcon, Save, Star, StarOff } from "lucide-react";
+import { Loader2, FileText, Check, X, Shield, ShieldOff, Trash2, Keyboard, Search, Filter, CalendarIcon, Save, Star, StarOff, Download, Upload } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { toast } from "sonner";
 
@@ -66,6 +66,8 @@ export function DuplicateCleanupPreview({
   const [showSavePresetDialog, setShowSavePresetDialog] = useState(false);
   const [presetName, setPresetName] = useState("");
   const [presetDescription, setPresetDescription] = useState("");
+  const [showImportDialog, setShowImportDialog] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
   // Fetch filter presets
   const { data: filterPresets } = useQuery({
     queryKey: ["cleanup-filter-presets"],
@@ -319,6 +321,33 @@ export function DuplicateCleanupPreview({
     },
   });
 
+  const importPresetMutation = useMutation({
+    mutationFn: async (presetData: any) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      const { error } = await supabase
+        .from("filter_presets")
+        .insert({
+          user_id: user.id,
+          name: presetData.name,
+          description: presetData.description,
+          filter_data: presetData.filter_data,
+        });
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["cleanup-filter-presets"] });
+      setShowImportDialog(false);
+      setImportFile(null);
+      toast.success("Preset imported successfully");
+    },
+    onError: (error: any) => {
+      toast.error("Failed to import preset: " + error.message);
+    },
+  });
+
   const toggleFileSelection = (fileId: string) => {
     const newSelected = new Set(selectedFiles);
     if (newSelected.has(fileId)) {
@@ -408,6 +437,48 @@ export function DuplicateCleanupPreview({
       return;
     }
     setShowSavePresetDialog(true);
+  };
+
+  const exportPreset = (preset: any) => {
+    const exportData = {
+      name: preset.name,
+      description: preset.description,
+      filter_data: preset.filter_data,
+      exported_at: new Date().toISOString(),
+      version: "1.0"
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `filter-preset-${preset.name.toLowerCase().replace(/\s+/g, '-')}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast.success("Preset exported successfully");
+  };
+
+  const handleImportFile = async () => {
+    if (!importFile) {
+      toast.error("Please select a file to import");
+      return;
+    }
+
+    try {
+      const text = await importFile.text();
+      const presetData = JSON.parse(text);
+
+      // Validate the imported data
+      if (!presetData.name || !presetData.filter_data) {
+        throw new Error("Invalid preset file format");
+      }
+
+      importPresetMutation.mutate(presetData);
+    } catch (error: any) {
+      toast.error("Failed to parse preset file: " + error.message);
+    }
   };
 
   // Keyboard shortcuts
@@ -600,6 +671,14 @@ export function DuplicateCleanupPreview({
             >
               <Save className="h-4 w-4" />
             </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setShowImportDialog(true)}
+              title="Import preset from file"
+            >
+              <Upload className="h-4 w-4" />
+            </Button>
           </div>
           
           {filterPresets && filterPresets.length > 0 && (
@@ -615,6 +694,15 @@ export function DuplicateCleanupPreview({
                   >
                     <Star className="h-3 w-3 mr-1" />
                     {preset.name}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => exportPreset(preset)}
+                    className="h-7 w-7"
+                    title="Export preset"
+                  >
+                    <Download className="h-3 w-3" />
                   </Button>
                   <Button
                     variant="ghost"
@@ -820,6 +908,107 @@ export function DuplicateCleanupPreview({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={showSavePresetDialog} onOpenChange={setShowSavePresetDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Save Filter Preset</DialogTitle>
+            <DialogDescription>
+              Save your current filter combination for quick access later
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="preset-name">Preset Name</Label>
+              <Input
+                id="preset-name"
+                placeholder="e.g., Recent Protected Files"
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="preset-description">Description (optional)</Label>
+              <Input
+                id="preset-description"
+                placeholder="What does this filter show?"
+                value={presetDescription}
+                onChange={(e) => setPresetDescription(e.target.value)}
+              />
+            </div>
+            <div className="text-sm text-muted-foreground bg-muted p-3 rounded-lg">
+              <div className="font-medium mb-1">Current filters:</div>
+              {searchQuery && <div>• Search: "{searchQuery}"</div>}
+              <div>• Type: {filterType === "all" ? "All files" : filterType.replace("-", " ")}</div>
+              {filterDate && <div>• Date: Before {format(filterDate, "PP")}</div>}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowSavePresetDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => savePresetMutation.mutate({ name: presetName, description: presetDescription })}
+              disabled={!presetName.trim() || savePresetMutation.isPending}
+            >
+              {savePresetMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Save Preset
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Import Filter Preset</DialogTitle>
+            <DialogDescription>
+              Import a preset from a JSON file shared by another user
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="preset-file">Select Preset File</Label>
+              <Input
+                id="preset-file"
+                type="file"
+                accept=".json"
+                onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Choose a .json file exported from another user's presets
+              </p>
+            </div>
+            {importFile && (
+              <div className="text-sm bg-muted p-3 rounded-lg">
+                <div className="font-medium mb-1">File selected:</div>
+                <div className="text-muted-foreground">{importFile.name}</div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowImportDialog(false);
+                setImportFile(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleImportFile}
+              disabled={!importFile || importPresetMutation.isPending}
+            >
+              {importPresetMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Import Preset
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
