@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "sonner";
-import { Upload, FileAudio, Loader2, Youtube, AlertTriangle, Shield, Eye, History, CheckCircle2, XCircle } from "lucide-react";
+import { Upload, FileAudio, Loader2, Youtube, AlertTriangle, Shield, Eye, History, CheckCircle2, XCircle, Subtitles, AlertCircle } from "lucide-react";
 import { calculateFileChecksum } from "@/lib/checksumUtils";
 import { format } from "date-fns";
 
@@ -37,6 +37,12 @@ export function TranscriptionUpload() {
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<TranscriptionResult | null>(null);
   const [mode, setMode] = useState<'transcribe' | 'translate'>('transcribe');
+  const [captionStatus, setCaptionStatus] = useState<{
+    checking: boolean;
+    available: boolean | null;
+    language?: string;
+    message?: string;
+  }>({ checking: false, available: null });
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -196,6 +202,76 @@ export function TranscriptionUpload() {
     }
   };
 
+  const checkCaptionAvailability = async (url: string) => {
+    // Extract video ID from URL
+    const videoIdMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/);
+    if (!videoIdMatch) {
+      setCaptionStatus({ checking: false, available: null, message: "Invalid YouTube URL" });
+      return;
+    }
+
+    const videoId = videoIdMatch[1];
+    setCaptionStatus({ checking: true, available: null });
+
+    try {
+      // Check captions via YouTube oEmbed and fetch basic info
+      const response = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
+      
+      if (!response.ok) {
+        setCaptionStatus({ 
+          checking: false, 
+          available: false, 
+          message: "Could not verify video - it may be private or unavailable" 
+        });
+        return;
+      }
+
+      // Try to check if captions exist by attempting to fetch them
+      const captionCheckResponse = await fetch(`https://www.youtube.com/api/timedtext?v=${videoId}&lang=en`);
+      
+      if (captionCheckResponse.ok) {
+        const text = await captionCheckResponse.text();
+        if (text && text.trim().length > 0 && text.includes('<text')) {
+          setCaptionStatus({ 
+            checking: false, 
+            available: true, 
+            language: "en",
+            message: "English captions detected - ready for fast transcription!" 
+          });
+          return;
+        }
+      }
+
+      // If English captions not found, indicate captions may not be available
+      setCaptionStatus({ 
+        checking: false, 
+        available: false,
+        message: "No captions detected - this video may not be supported" 
+      });
+
+    } catch (error) {
+      console.error("Error checking captions:", error);
+      setCaptionStatus({ 
+        checking: false, 
+        available: null,
+        message: "Unable to check caption availability" 
+      });
+    }
+  };
+
+  const handleYouTubeUrlChange = (url: string) => {
+    setYoutubeUrl(url);
+    setCaptionStatus({ checking: false, available: null });
+    
+    // Debounce the caption check
+    if (url.trim()) {
+      const timer = setTimeout(() => {
+        checkCaptionAvailability(url);
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  };
+
   const handleYoutubeTranscribe = async () => {
     if (!youtubeUrl.trim()) {
       toast.error("Please enter a YouTube URL");
@@ -259,6 +335,7 @@ export function TranscriptionUpload() {
     setResult(null);
     setProgress(0);
     setMode('transcribe');
+    setCaptionStatus({ checking: false, available: null });
   };
 
   const handleUseCachedResult = (log: any) => {
@@ -510,7 +587,7 @@ export function TranscriptionUpload() {
                     type="url"
                     placeholder="https://www.youtube.com/watch?v=..."
                     value={youtubeUrl}
-                    onChange={(e) => setYoutubeUrl(e.target.value)}
+                    onChange={(e) => handleYouTubeUrlChange(e.target.value)}
                     disabled={isProcessing}
                   />
                   {youtubeUrl && (
@@ -527,6 +604,64 @@ export function TranscriptionUpload() {
                   Paste a YouTube video URL to extract and transcribe the audio
                 </p>
               </div>
+
+              {/* Caption Availability Indicator */}
+              {youtubeUrl && (
+                <Alert className={
+                  captionStatus.checking ? "" :
+                  captionStatus.available === true ? "border-green-500 bg-green-50 dark:bg-green-950" :
+                  captionStatus.available === false ? "border-yellow-500 bg-yellow-50 dark:bg-yellow-950" :
+                  ""
+                }>
+                  {captionStatus.checking ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <AlertDescription>
+                        Checking caption availability...
+                      </AlertDescription>
+                    </>
+                  ) : captionStatus.available === true ? (
+                    <>
+                      <Subtitles className="h-4 w-4 text-green-600 dark:text-green-400" />
+                      <AlertDescription className="text-green-700 dark:text-green-300">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <strong className="font-semibold">Captions Available!</strong>
+                            <p className="text-sm mt-1">{captionStatus.message}</p>
+                            {captionStatus.language && (
+                              <p className="text-xs mt-1 opacity-75">Language: {captionStatus.language.toUpperCase()}</p>
+                            )}
+                          </div>
+                          <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0 ml-2" />
+                        </div>
+                      </AlertDescription>
+                    </>
+                  ) : captionStatus.available === false ? (
+                    <>
+                      <AlertCircle className="h-4 w-4 text-yellow-600 dark:text-yellow-400" />
+                      <AlertDescription className="text-yellow-700 dark:text-yellow-300">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <strong className="font-semibold">No Captions Found</strong>
+                            <p className="text-sm mt-1">{captionStatus.message}</p>
+                            <p className="text-xs mt-2 opacity-75">
+                              This video may not work with the current transcription method. Try a video with captions/subtitles enabled.
+                            </p>
+                          </div>
+                          <XCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 ml-2" />
+                        </div>
+                      </AlertDescription>
+                    </>
+                  ) : captionStatus.message ? (
+                    <>
+                      <AlertTriangle className="h-4 w-4" />
+                      <AlertDescription>
+                        {captionStatus.message}
+                      </AlertDescription>
+                    </>
+                  ) : null}
+                </Alert>
+              )}
 
               <div className="flex items-center space-x-2">
                 <Checkbox 
