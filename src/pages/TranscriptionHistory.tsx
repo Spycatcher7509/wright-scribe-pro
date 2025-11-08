@@ -90,6 +90,7 @@ interface FilterPreferences {
   visibleColumns: ColumnVisibility;
   lengthRange: [number, number];
   showAdvancedFilters: boolean;
+  selectedTagFilters: string[];
 }
 
 interface ColumnVisibility {
@@ -169,6 +170,9 @@ export default function TranscriptionHistory() {
   const [newTagName, setNewTagName] = useState('');
   const [newTagColor, setNewTagColor] = useState('#3b82f6');
   const [assignTagsToLog, setAssignTagsToLog] = useState<TranscriptionLog | null>(null);
+  const [selectedTagFilters, setSelectedTagFilters] = useState<Set<string>>(
+    new Set(savedPrefs.selectedTagFilters || [])
+  );
 
   // Save filter preferences whenever they change
   useEffect(() => {
@@ -184,9 +188,10 @@ export default function TranscriptionHistory() {
       visibleColumns,
       lengthRange,
       showAdvancedFilters,
+      selectedTagFilters: Array.from(selectedTagFilters),
     };
     saveFilterPreferences(preferences);
-  }, [searchQuery, contentSearchQuery, startDate, endDate, selectedStatuses, pageSize, sortField, sortDirection, visibleColumns, lengthRange, showAdvancedFilters]);
+  }, [searchQuery, contentSearchQuery, startDate, endDate, selectedStatuses, pageSize, sortField, sortDirection, visibleColumns, lengthRange, showAdvancedFilters, selectedTagFilters]);
 
 
   // Fetch tags
@@ -308,7 +313,7 @@ export default function TranscriptionHistory() {
   useEffect(() => {
     filterLogs();
     setCurrentPage(1); // Reset to first page when filters or sort changes
-  }, [searchQuery, contentSearchQuery, startDate, endDate, logs, sortField, sortDirection, selectedStatuses, lengthRange]);
+  }, [searchQuery, contentSearchQuery, startDate, endDate, logs, sortField, sortDirection, selectedStatuses, lengthRange, selectedTagFilters]);
 
 
   const checkAuth = async () => {
@@ -398,6 +403,15 @@ export default function TranscriptionHistory() {
       filtered = filtered.filter((log) => {
         const length = log.transcription_text?.length || 0;
         return length >= lengthRange[0] && length <= lengthRange[1];
+      });
+    }
+
+    // Tag filter
+    if (selectedTagFilters.size > 0) {
+      filtered = filtered.filter((log) => {
+        if (!log.tags || log.tags.length === 0) return false;
+        // Check if the log has at least one of the selected tags
+        return log.tags.some(tag => selectedTagFilters.has(tag.id));
       });
     }
 
@@ -622,6 +636,7 @@ export default function TranscriptionHistory() {
     setSortDirection(null);
     setSelectedStatuses(new Set(['completed', 'processing', 'failed']));
     setLengthRange([0, 50000]);
+    setSelectedTagFilters(new Set());
   };
 
   // Quick date presets
@@ -668,6 +683,16 @@ export default function TranscriptionHistory() {
       newStatuses.add(status);
     }
     setSelectedStatuses(newStatuses);
+  };
+
+  const toggleTagFilter = (tagId: string) => {
+    const newTagFilters = new Set(selectedTagFilters);
+    if (newTagFilters.has(tagId)) {
+      newTagFilters.delete(tagId);
+    } else {
+      newTagFilters.add(tagId);
+    }
+    setSelectedTagFilters(newTagFilters);
   };
 
   const handleExportCSV = () => {
@@ -1550,7 +1575,7 @@ export default function TranscriptionHistory() {
                       <Filter className="ml-2 h-4 w-4 opacity-50" />
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-[200px] p-0 bg-popover z-50" align="start">
+                  <PopoverContent className="w-[200px] p-0 bg-card border shadow-lg z-50" align="start">
                     <Command>
                       <CommandList>
                         <CommandGroup>
@@ -1589,6 +1614,62 @@ export default function TranscriptionHistory() {
                         </CommandGroup>
                       </CommandList>
                     </Command>
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Filter by Tags</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-between">
+                      <span>
+                        {selectedTagFilters.size === 0 
+                          ? 'All Tags' 
+                          : `${selectedTagFilters.size} tag${selectedTagFilters.size !== 1 ? 's' : ''}`}
+                      </span>
+                      <Tag className="ml-2 h-4 w-4 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-64 bg-card border shadow-lg z-50" align="start">
+                    <div className="space-y-2">
+                      <h4 className="font-medium text-sm mb-2">Filter by Tags</h4>
+                      {tags.length === 0 ? (
+                        <p className="text-sm text-muted-foreground py-2">No tags available</p>
+                      ) : (
+                        <div className="space-y-2 max-h-60 overflow-y-auto">
+                          {tags.map((tag) => (
+                            <div key={tag.id} className="flex items-center space-x-2">
+                              <Checkbox
+                                id={`tag-filter-${tag.id}`}
+                                checked={selectedTagFilters.has(tag.id)}
+                                onCheckedChange={() => toggleTagFilter(tag.id)}
+                              />
+                              <label
+                                htmlFor={`tag-filter-${tag.id}`}
+                                className="flex items-center gap-2 text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
+                              >
+                                <div
+                                  className="w-3 h-3 rounded"
+                                  style={{ backgroundColor: tag.color }}
+                                />
+                                {tag.name}
+                              </label>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {selectedTagFilters.size > 0 && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full mt-2"
+                          onClick={() => setSelectedTagFilters(new Set())}
+                        >
+                          Clear Tag Filters
+                        </Button>
+                      )}
+                    </div>
                   </PopoverContent>
                 </Popover>
               </div>
