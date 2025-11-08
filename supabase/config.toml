@@ -14,3 +14,6 @@ verify_jwt = true
 
 [functions.scheduled-cleanup]
 verify_jwt = false
+
+[functions.monitor-transcription-errors]
+verify_jwt = false
