@@ -52,7 +52,7 @@ export function TranscriptionUpload() {
   }>({ isLoading: false, text: null, lines: [] });
   const [showPreview, setShowPreview] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchLanguage, setSearchLanguage] = useState("");
+  const [searchLanguage, setSearchLanguage] = useState("any");
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
@@ -325,7 +325,7 @@ export function TranscriptionUpload() {
       const { data, error } = await supabase.functions.invoke('search-youtube', {
         body: {
           query: searchQuery,
-          language: searchLanguage || undefined,
+          language: searchLanguage === 'any' ? undefined : searchLanguage,
           maxResults: 10
         }
       });
@@ -391,7 +391,7 @@ export function TranscriptionUpload() {
         video_title: video.title,
         video_thumbnail: video.thumbnail,
         channel_title: video.channelTitle,
-        language: video.captions.hasRequestedLanguage ? searchLanguage : 'en',
+        language: video.captions.hasRequestedLanguage && searchLanguage !== 'any' ? searchLanguage : 'en',
         status: 'pending'
       }));
 
@@ -601,7 +601,7 @@ export function TranscriptionUpload() {
     setShowSearch(false);
     setSearchResults([]);
     setSearchQuery("");
-    setSearchLanguage("");
+    setSearchLanguage("any");
     setSelectedVideos(new Set());
     setBulkProgress({});
   };
@@ -882,7 +882,7 @@ export function TranscriptionUpload() {
                             <SelectValue placeholder="Any language" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="">Any language</SelectItem>
+                            <SelectItem value="any">Any language</SelectItem>
                             <SelectItem value="en">English</SelectItem>
                             <SelectItem value="es">Spanish</SelectItem>
                             <SelectItem value="fr">French</SelectItem>
