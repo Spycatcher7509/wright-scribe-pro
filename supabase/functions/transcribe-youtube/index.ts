@@ -262,7 +262,77 @@ async function getYouTubeContent(videoId: string, language: string = 'en'): Prom
 
   // If no transcript available, fall back to audio transcription
   console.log("No transcript available, falling back to audio download + Whisper");
-  throw new Error("Video does not have captions/subtitles available. Audio download feature has been temporarily disabled due to third-party API issues. Please try a video with captions enabled.");
+  
+  try {
+    // Download audio using yt-dlp API
+    const audioUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    console.log("Downloading audio from:", audioUrl);
+    
+    // Use a third-party service to extract audio URL
+    const ytDlpResponse = await fetch(`https://www.yt-download.org/api/json/info?url=${encodeURIComponent(audioUrl)}`);
+    
+    if (!ytDlpResponse.ok) {
+      throw new Error("Failed to fetch audio download information");
+    }
+    
+    const ytDlpData = await ytDlpResponse.json();
+    
+    // Find the best audio format
+    const audioFormat = ytDlpData.formats?.find((f: any) => 
+      f.acodec !== 'none' && f.vcodec === 'none'
+    ) || ytDlpData.formats?.[0];
+    
+    if (!audioFormat?.url) {
+      throw new Error("Could not find audio stream URL");
+    }
+    
+    console.log("Downloading audio stream...");
+    const audioResponse = await fetch(audioFormat.url);
+    
+    if (!audioResponse.ok) {
+      throw new Error("Failed to download audio");
+    }
+    
+    const audioBlob = await audioResponse.blob();
+    console.log(`Audio downloaded: ${audioBlob.size} bytes`);
+    
+    // Transcribe using OpenAI Whisper
+    console.log("Transcribing with OpenAI Whisper...");
+    const formData = new FormData();
+    formData.append('file', audioBlob, 'audio.webm');
+    formData.append('model', 'whisper-1');
+    if (language !== 'en') {
+      formData.append('language', language);
+    }
+    
+    const whisperResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openAIApiKey}`,
+      },
+      body: formData,
+    });
+    
+    if (!whisperResponse.ok) {
+      const errorText = await whisperResponse.text();
+      console.error("Whisper API error:", errorText);
+      throw new Error(`Whisper transcription failed: ${whisperResponse.status}`);
+    }
+    
+    const whisperData = await whisperResponse.json();
+    console.log("Whisper transcription complete");
+    
+    return { 
+      text: whisperData.text, 
+      title, 
+      method: "whisper_transcription",
+      language 
+    };
+    
+  } catch (audioError: any) {
+    console.error("Audio transcription failed:", audioError);
+    throw new Error(`Video does not have captions and audio transcription failed: ${audioError.message}`);
+  }
 }
 
 serve(async (req: Request) => {
