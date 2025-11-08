@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { User as SupabaseUser, Session } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +23,7 @@ export default function Dashboard() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [allUsers, setAllUsers] = useState<any[]>([]);
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -32,6 +34,7 @@ export default function Dashboard() {
         if (session?.user) {
           setTimeout(() => {
             fetchUserRole(session.user.id);
+            fetchUserProfile(session.user.id);
           }, 0);
         }
       }
@@ -45,6 +48,7 @@ export default function Dashboard() {
         navigate("/auth");
       } else {
         fetchUserRole(session.user.id);
+        fetchUserProfile(session.user.id);
       }
     });
 
@@ -70,6 +74,18 @@ export default function Dashboard() {
       if (data.role === "admin") {
         fetchAllUsers();
       }
+    }
+  };
+
+  const fetchUserProfile = async (userId: string) => {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("avatar_url")
+      .eq("id", userId)
+      .single();
+
+    if (!error && data) {
+      setAvatarUrl(data.avatar_url);
     }
   };
 
@@ -166,16 +182,24 @@ export default function Dashboard() {
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">The Wright Scriber Pro</h1>
-            <div className="flex items-center gap-2">
-              <p className="text-sm text-muted-foreground">{user.email}</p>
-              {userRole && (
-                <Badge variant={isAdmin ? "default" : "secondary"}>
-                  <Shield className="w-3 h-3 mr-1" />
-                  {userRole}
-                </Badge>
-              )}
+          <div className="flex items-center gap-3">
+            <Avatar className="h-10 w-10">
+              <AvatarImage src={avatarUrl || undefined} alt="Profile" />
+              <AvatarFallback className="bg-primary/10">
+                <User className="h-5 w-5 text-primary" />
+              </AvatarFallback>
+            </Avatar>
+            <div>
+              <h1 className="text-2xl font-bold text-foreground">The Wright Scriber Pro</h1>
+              <div className="flex items-center gap-2">
+                <p className="text-sm text-muted-foreground">{user.email}</p>
+                {userRole && (
+                  <Badge variant={isAdmin ? "default" : "secondary"}>
+                    <Shield className="w-3 h-3 mr-1" />
+                    {userRole}
+                  </Badge>
+                )}
+              </div>
             </div>
           </div>
           <div className="flex gap-2">

@@ -47,6 +47,69 @@ export type Database = {
         }
         Relationships: []
       }
+      duplicate_cleanup_config: {
+        Row: {
+          created_at: string
+          delete_older_than_days: number
+          enabled: boolean
+          id: string
+          keep_latest: boolean
+          run_schedule: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          delete_older_than_days?: number
+          enabled?: boolean
+          id?: string
+          keep_latest?: boolean
+          run_schedule?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          delete_older_than_days?: number
+          enabled?: boolean
+          id?: string
+          keep_latest?: boolean
+          run_schedule?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      duplicate_cleanup_history: {
+        Row: {
+          error_message: string | null
+          files_deleted: number
+          id: string
+          run_at: string
+          space_freed_bytes: number
+          status: string
+          user_id: string
+        }
+        Insert: {
+          error_message?: string | null
+          files_deleted?: number
+          id?: string
+          run_at?: string
+          space_freed_bytes?: number
+          status?: string
+          user_id: string
+        }
+        Update: {
+          error_message?: string | null
+          files_deleted?: number
+          id?: string
+          run_at?: string
+          space_freed_bytes?: number
+          status?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       filter_presets: {
         Row: {
           clone_count: number
@@ -231,6 +294,7 @@ export type Database = {
       }
       profiles: {
         Row: {
+          avatar_url: string | null
           created_at: string
           email: string
           id: string
@@ -239,6 +303,7 @@ export type Database = {
           user_group: string
         }
         Insert: {
+          avatar_url?: string | null
           created_at?: string
           email: string
           id: string
@@ -247,6 +312,7 @@ export type Database = {
           user_group: string
         }
         Update: {
+          avatar_url?: string | null
           created_at?: string
           email?: string
           id?: string
