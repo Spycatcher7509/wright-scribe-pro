@@ -16,6 +16,7 @@ import { DuplicateCleanupConfig } from "@/components/DuplicateCleanupConfig";
 import { DuplicateCleanupHistory } from "@/components/DuplicateCleanupHistory";
 import { NotificationBell } from "@/components/NotificationBell";
 import { TranscriptionQueueManager } from "@/components/TranscriptionQueueManager";
+import { QuickRecorder } from "@/components/QuickRecorder";
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -265,7 +266,10 @@ export default function Dashboard() {
           </TabsList>
 
           <TabsContent value="transcribe">
-            <TranscriptionUpload />
+            <div className="space-y-6">
+              <QuickRecorder />
+              <TranscriptionUpload />
+            </div>
           </TabsContent>
 
           <TabsContent value="queue">
