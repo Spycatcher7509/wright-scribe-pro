@@ -138,8 +138,13 @@ interface FilterPreset {
     endDate?: string;
     lengthRange?: [number, number];
   };
+  is_shared: boolean;
+  user_id: string;
   created_at: string;
   updated_at: string;
+  profiles?: {
+    email: string;
+  };
 }
 
 type SortField = 'file_title' | 'status' | 'created_at';
@@ -260,6 +265,9 @@ export default function TranscriptionHistory() {
   const [showSavePresetDialog, setShowSavePresetDialog] = useState(false);
   const [presetName, setPresetName] = useState('');
   const [presetDescription, setPresetDescription] = useState('');
+  const [showMarketplace, setShowMarketplace] = useState(false);
+  const [sharedPresets, setSharedPresets] = useState<FilterPreset[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   // Save filter preferences whenever they change
   useEffect(() => {
@@ -477,10 +485,18 @@ export default function TranscriptionHistory() {
 
   // Fetch filter presets
   useEffect(() => {
+    const fetchCurrentUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setCurrentUserId(user?.id || null);
+    };
+
+    fetchCurrentUser();
+
     const fetchPresets = async () => {
       const { data, error } = await supabase
         .from('filter_presets')
         .select('*')
+        .eq('user_id', (await supabase.auth.getUser()).data.user?.id || '')
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -493,7 +509,31 @@ export default function TranscriptionHistory() {
       }
     };
 
+    const fetchSharedPresets = async () => {
+      const currentUser = (await supabase.auth.getUser()).data.user;
+      
+      const { data, error } = await supabase
+        .from('filter_presets')
+        .select(`
+          *,
+          profiles!inner(email)
+        `)
+        .eq('is_shared', true)
+        .neq('user_id', currentUser?.id || '')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching shared presets:', error);
+        return;
+      }
+
+      if (data) {
+        setSharedPresets(data as any);
+      }
+    };
+
     fetchPresets();
+    fetchSharedPresets();
 
     // Subscribe to changes
     const presetsChannel = supabase
@@ -507,6 +547,7 @@ export default function TranscriptionHistory() {
         },
         () => {
           fetchPresets();
+          fetchSharedPresets();
         }
       )
       .subscribe();
@@ -766,6 +807,49 @@ export default function TranscriptionHistory() {
 
     // Reset file input
     event.target.value = '';
+  };
+
+  // Toggle preset sharing
+  const handleToggleSharing = async (presetId: string, currentIsShared: boolean, presetName: string) => {
+    const { error } = await supabase
+      .from('filter_presets')
+      .update({ is_shared: !currentIsShared })
+      .eq('id', presetId);
+
+    if (error) {
+      console.error('Error toggling preset sharing:', error);
+      toast.error('Failed to update sharing status');
+      return;
+    }
+
+    toast.success(`${presetName} is now ${!currentIsShared ? 'shared with team' : 'private'}`);
+  };
+
+  // Clone a shared preset
+  const handleClonePreset = async (preset: FilterPreset) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      toast.error('You must be logged in to clone presets');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('filter_presets')
+      .insert({
+        user_id: user.id,
+        name: `${preset.name} (Copy)`,
+        description: preset.description || null,
+        filter_data: preset.filter_data,
+        is_shared: false,
+      });
+
+    if (error) {
+      console.error('Error cloning preset:', error);
+      toast.error('Failed to clone preset');
+      return;
+    }
+
+    toast.success(`Cloned "${preset.name}" to your presets`);
   };
 
   useEffect(() => {
@@ -2562,6 +2646,14 @@ export default function TranscriptionHistory() {
                           >
                             <Plus className="h-4 w-4" />
                           </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setShowMarketplace(true)}
+                            title="Browse shared presets"
+                          >
+                            <Tag className="h-4 w-4" />
+                          </Button>
                         </div>
                       </div>
 
@@ -2577,7 +2669,12 @@ export default function TranscriptionHistory() {
                               className="flex items-start justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
                             >
                               <div className="flex-1 min-w-0 cursor-pointer" onClick={() => handleLoadPreset(preset)}>
-                                <h5 className="font-medium text-sm truncate">{preset.name}</h5>
+                                <div className="flex items-center gap-2">
+                                  <h5 className="font-medium text-sm truncate">{preset.name}</h5>
+                                  {preset.is_shared && (
+                                    <Badge variant="outline" className="text-xs">Shared</Badge>
+                                  )}
+                                </div>
                                 {preset.description && (
                                   <p className="text-xs text-muted-foreground line-clamp-2 mt-1">
                                     {preset.description}
@@ -2602,17 +2699,39 @@ export default function TranscriptionHistory() {
                                   )}
                                 </div>
                               </div>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 w-8 p-0 ml-2 flex-shrink-0"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeletePreset(preset.id, preset.name);
-                                }}
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
+                              <div className="flex items-center gap-1 ml-2 flex-shrink-0">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleToggleSharing(preset.id, preset.is_shared, preset.name);
+                                  }}
+                                  title={preset.is_shared ? "Make private" : "Share with team"}
+                                >
+                                  {preset.is_shared ? (
+                                    <Badge variant="outline" className="h-6 w-6 p-0 flex items-center justify-center">
+                                      👥
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="secondary" className="h-6 w-6 p-0 flex items-center justify-center">
+                                      🔒
+                                    </Badge>
+                                  )}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeletePreset(preset.id, preset.name);
+                                  }}
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -4501,6 +4620,118 @@ export default function TranscriptionHistory() {
             </Button>
             <Button onClick={handleSavePreset}>
               Save Preset
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Preset Marketplace Dialog */}
+      <Dialog open={showMarketplace} onOpenChange={setShowMarketplace}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Preset Marketplace</DialogTitle>
+            <DialogDescription>
+              Browse and clone filter presets shared by your team members
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto">
+            {sharedPresets.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <Tag className="h-12 w-12 text-muted-foreground mb-4" />
+                <h3 className="font-medium text-lg mb-2">No Shared Presets Yet</h3>
+                <p className="text-sm text-muted-foreground max-w-md">
+                  When team members share their filter presets, they'll appear here for you to browse and clone.
+                </p>
+              </div>
+            ) : (
+              <div className="grid gap-4">
+                {sharedPresets.map((preset) => (
+                  <Card key={preset.id} className="hover:shadow-md transition-shadow">
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-2">
+                            <h3 className="font-semibold text-base truncate">{preset.name}</h3>
+                            <Badge variant="outline" className="text-xs">Shared</Badge>
+                          </div>
+                          
+                          {preset.description && (
+                            <p className="text-sm text-muted-foreground mb-3">
+                              {preset.description}
+                            </p>
+                          )}
+
+                          <div className="flex flex-wrap gap-2 mb-3">
+                            {preset.filter_data.searchQuery && (
+                              <Badge variant="secondary" className="text-xs">
+                                Search: {preset.filter_data.searchQuery}
+                              </Badge>
+                            )}
+                            {preset.filter_data.selectedStatuses && preset.filter_data.selectedStatuses.length > 0 && (
+                              <Badge variant="secondary" className="text-xs">
+                                {preset.filter_data.selectedStatuses.length} status filter(s)
+                              </Badge>
+                            )}
+                            {preset.filter_data.selectedTagFilters && preset.filter_data.selectedTagFilters.length > 0 && (
+                              <Badge variant="secondary" className="text-xs">
+                                {preset.filter_data.selectedTagFilters.length} tag filter(s)
+                              </Badge>
+                            )}
+                            {(preset.filter_data.startDate || preset.filter_data.endDate) && (
+                              <Badge variant="secondary" className="text-xs">
+                                Date range filter
+                              </Badge>
+                            )}
+                            {preset.filter_data.lengthRange && 
+                             (preset.filter_data.lengthRange[0] !== 0 || preset.filter_data.lengthRange[1] !== 50000) && (
+                              <Badge variant="secondary" className="text-xs">
+                                Length filter
+                              </Badge>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <span>Shared by: {preset.profiles?.email || 'Unknown'}</span>
+                            <span>•</span>
+                            <span>{format(new Date(preset.created_at), 'MMM d, yyyy')}</span>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              handleClonePreset(preset);
+                              setShowMarketplace(false);
+                            }}
+                          >
+                            <Download className="h-4 w-4 mr-2" />
+                            Clone
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              handleLoadPreset(preset);
+                              setShowMarketplace(false);
+                            }}
+                          >
+                            <Eye className="h-4 w-4 mr-2" />
+                            Preview
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end pt-4 border-t">
+            <Button variant="outline" onClick={() => setShowMarketplace(false)}>
+              Close
             </Button>
           </div>
         </DialogContent>
