@@ -376,88 +376,44 @@ export function TranscriptionUpload() {
 
     const selectedVideosList = searchResults.filter(v => selectedVideos.has(v.videoId));
     
-    setIsBulkProcessing(true);
-    const initialProgress: typeof bulkProgress = {};
-    selectedVideosList.forEach(video => {
-      initialProgress[video.videoId] = { status: 'pending', progress: 0 };
-    });
-    setBulkProgress(initialProgress);
-
-    toast.info(`Starting transcription of ${selectedVideos.size} video${selectedVideos.size > 1 ? 's' : ''}...`);
-
-    // Process videos sequentially to avoid rate limits
-    for (const video of selectedVideosList) {
-      try {
-        setBulkProgress(prev => ({
-          ...prev,
-          [video.videoId]: { ...prev[video.videoId], status: 'processing', progress: 10 }
-        }));
-
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) {
-          throw new Error("Session expired");
-        }
-
-        // Simulate progress updates
-        const progressInterval = setInterval(() => {
-          setBulkProgress(prev => ({
-            ...prev,
-            [video.videoId]: { 
-              ...prev[video.videoId], 
-              progress: Math.min((prev[video.videoId]?.progress || 0) + 15, 90) 
-            }
-          }));
-        }, 500);
-
-        const { data, error } = await supabase.functions.invoke("transcribe-youtube", {
-          body: { 
-            youtubeUrl: video.url,
-            language: video.captions.hasRequestedLanguage ? searchLanguage : 'en',
-            downloadVideo: false
-          },
-        });
-
-        clearInterval(progressInterval);
-
-        if (error) throw error;
-        if (data.error) throw new Error(data.error);
-
-        setBulkProgress(prev => ({
-          ...prev,
-          [video.videoId]: { 
-            status: 'completed', 
-            progress: 100,
-            result: data
-          }
-        }));
-
-        toast.success(`Completed: ${video.title.substring(0, 50)}...`);
-
-        // Small delay between videos to avoid overwhelming the API
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-      } catch (error: any) {
-        console.error(`Error transcribing ${video.videoId}:`, error);
-        
-        setBulkProgress(prev => ({
-          ...prev,
-          [video.videoId]: { 
-            status: 'failed', 
-            progress: 0,
-            error: error.message || 'Transcription failed'
-          }
-        }));
-
-        toast.error(`Failed: ${video.title.substring(0, 50)}...`);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast.error("You must be logged in");
+        return;
       }
-    }
 
-    setIsBulkProcessing(false);
-    
-    const completed = Object.values(bulkProgress).filter(p => p.status === 'completed').length;
-    const failed = Object.values(bulkProgress).filter(p => p.status === 'failed').length;
-    
-    toast.success(`Bulk transcription complete: ${completed} succeeded, ${failed} failed`);
+      // Add all selected videos to the queue
+      const queueItems = selectedVideosList.map(video => ({
+        user_id: user.id,
+        video_id: video.videoId,
+        video_url: video.url,
+        video_title: video.title,
+        video_thumbnail: video.thumbnail,
+        channel_title: video.channelTitle,
+        language: video.captions.hasRequestedLanguage ? searchLanguage : 'en',
+        status: 'pending'
+      }));
+
+      const { error } = await supabase
+        .from('transcription_queue')
+        .insert(queueItems);
+
+      if (error) throw error;
+
+      toast.success(`Added ${selectedVideos.size} video${selectedVideos.size > 1 ? 's' : ''} to queue`);
+      
+      // Clear selection
+      setSelectedVideos(new Set());
+      setBulkProgress({});
+      
+      // Optionally navigate to queue manager or show it
+      toast.info('View the Queue Manager to process these videos');
+      
+    } catch (error: any) {
+      console.error('Error adding to queue:', error);
+      toast.error('Failed to add videos to queue');
+    }
   };
 
   const handleViewBulkResult = (videoId: string) => {

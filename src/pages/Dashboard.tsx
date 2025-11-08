@@ -8,13 +8,14 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, FileAudio, History, Mail, Database, Users, Shield, User, Activity } from "lucide-react";
+import { LogOut, FileAudio, History, Mail, Database, Users, Shield, User, Activity, ListTodo } from "lucide-react";
 import { toast } from "sonner";
 import { DisclaimerModal } from "@/components/DisclaimerModal";
 import { TranscriptionUpload } from "@/components/TranscriptionUpload";
 import { DuplicateCleanupConfig } from "@/components/DuplicateCleanupConfig";
 import { DuplicateCleanupHistory } from "@/components/DuplicateCleanupHistory";
 import { NotificationBell } from "@/components/NotificationBell";
+import { TranscriptionQueueManager } from "@/components/TranscriptionQueueManager";
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -220,10 +221,14 @@ export default function Dashboard() {
 
       <main className="container mx-auto px-4 py-8">
         <Tabs defaultValue="transcribe" className="w-full">
-          <TabsList className={`grid w-full mb-8 ${isAdmin ? 'grid-cols-6' : 'grid-cols-4'}`}>
+          <TabsList className={`grid w-full mb-8 ${isAdmin ? 'grid-cols-7' : 'grid-cols-5'}`}>
             <TabsTrigger value="transcribe">
               <FileAudio className="mr-2 h-4 w-4" />
               Transcribe
+            </TabsTrigger>
+            <TabsTrigger value="queue">
+              <ListTodo className="mr-2 h-4 w-4" />
+              Queue
             </TabsTrigger>
             <TabsTrigger value="logs" onClick={() => navigate("/history")}>
               <History className="mr-2 h-4 w-4" />
@@ -253,6 +258,10 @@ export default function Dashboard() {
 
           <TabsContent value="transcribe">
             <TranscriptionUpload />
+          </TabsContent>
+
+          <TabsContent value="queue">
+            <TranscriptionQueueManager />
           </TabsContent>
 
           <TabsContent value="logs">

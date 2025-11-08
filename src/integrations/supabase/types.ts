@@ -666,6 +666,72 @@ export type Database = {
         }
         Relationships: []
       }
+      transcription_queue: {
+        Row: {
+          channel_title: string | null
+          completed_at: string | null
+          created_at: string | null
+          error_message: string | null
+          id: string
+          language: string | null
+          progress: number | null
+          result_duration: number | null
+          result_language: string | null
+          result_text: string | null
+          started_at: string | null
+          status: string
+          transcription_log_id: string | null
+          updated_at: string | null
+          user_id: string
+          video_id: string
+          video_thumbnail: string | null
+          video_title: string
+          video_url: string
+        }
+        Insert: {
+          channel_title?: string | null
+          completed_at?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          language?: string | null
+          progress?: number | null
+          result_duration?: number | null
+          result_language?: string | null
+          result_text?: string | null
+          started_at?: string | null
+          status?: string
+          transcription_log_id?: string | null
+          updated_at?: string | null
+          user_id: string
+          video_id: string
+          video_thumbnail?: string | null
+          video_title: string
+          video_url: string
+        }
+        Update: {
+          channel_title?: string | null
+          completed_at?: string | null
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          language?: string | null
+          progress?: number | null
+          result_duration?: number | null
+          result_language?: string | null
+          result_text?: string | null
+          started_at?: string | null
+          status?: string
+          transcription_log_id?: string | null
+          updated_at?: string | null
+          user_id?: string
+          video_id?: string
+          video_thumbnail?: string | null
+          video_title?: string
+          video_url?: string
+        }
+        Relationships: []
+      }
       transcription_tags: {
         Row: {
           created_at: string
