@@ -232,7 +232,11 @@ async function getTranscriptViaAPI(videoId: string, language: string = 'en'): Pr
 }
 
 // Main function to get transcript or audio
-async function getYouTubeContent(videoId: string, language: string = 'en'): Promise<{ text?: string; audioBlob?: Blob; title: string; method: string; language?: string }> {
+async function getYouTubeContent(
+  videoId: string, 
+  language: string = 'en',
+  updateProgress?: (status: string, progress: number, message: string) => Promise<void>
+): Promise<{ text?: string; audioBlob?: Blob; title: string; method: string; language?: string }> {
   // Get video title from YouTube oEmbed API
   const videoInfoResponse = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
   let title = `YouTube Video ${videoId}`;
@@ -264,6 +268,10 @@ async function getYouTubeContent(videoId: string, language: string = 'en'): Prom
   console.log("No transcript available, falling back to audio download + Whisper");
   
   try {
+    if (updateProgress) {
+      await updateProgress('downloading', 10, 'Downloading audio...');
+    }
+
     // Download audio using yt-dlp API
     const audioUrl = `https://www.youtube.com/watch?v=${videoId}`;
     console.log("Downloading audio from:", audioUrl);
@@ -296,6 +304,10 @@ async function getYouTubeContent(videoId: string, language: string = 'en'): Prom
     const audioBlob = await audioResponse.blob();
     console.log(`Audio downloaded: ${audioBlob.size} bytes`);
     
+    if (updateProgress) {
+      await updateProgress('transcribing', 50, 'Transcribing audio with AI...');
+    }
+
     // Transcribe using OpenAI Whisper
     console.log("Transcribing with OpenAI Whisper...");
     const formData = new FormData();
@@ -322,6 +334,10 @@ async function getYouTubeContent(videoId: string, language: string = 'en'): Prom
     const whisperData = await whisperResponse.json();
     console.log("Whisper transcription complete");
     
+    if (updateProgress) {
+      await updateProgress('completed', 100, 'Transcription complete!');
+    }
+
     return { 
       text: whisperData.text, 
       title, 
@@ -526,10 +542,27 @@ serve(async (req: Request) => {
 
     console.log(`Processing YouTube transcription for user ${user.id}, video: ${videoId}, language: ${requestedLanguage}`);
 
+    // Helper function to update progress
+    const updateProgress = async (status: string, progress: number, message: string) => {
+      await supabase.from('transcription_progress').upsert({
+        user_id: user.id,
+        video_id: videoId,
+        status,
+        progress,
+        message,
+        updated_at: new Date().toISOString()
+      }, {
+        onConflict: 'user_id,video_id'
+      });
+    };
+
+    // Initialize progress
+    await updateProgress('starting', 0, 'Starting transcription...');
+
     // Get transcript or audio
     let content;
     try {
-      content = await getYouTubeContent(videoId, requestedLanguage);
+      content = await getYouTubeContent(videoId, requestedLanguage, updateProgress);
     } catch (contentError: any) {
       console.error("Failed to get YouTube content:", contentError);
       
@@ -615,6 +648,9 @@ serve(async (req: Request) => {
     }
 
     console.log("Transcription successful");
+
+    // Update final progress
+    await updateProgress('completed', 100, 'Transcription saved successfully!');
 
     // Update log with success and transcription text
     await supabase

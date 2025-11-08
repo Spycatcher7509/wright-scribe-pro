@@ -666,6 +666,39 @@ export type Database = {
         }
         Relationships: []
       }
+      transcription_progress: {
+        Row: {
+          created_at: string
+          id: string
+          message: string | null
+          progress: number
+          status: string
+          updated_at: string
+          user_id: string
+          video_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          message?: string | null
+          progress?: number
+          status?: string
+          updated_at?: string
+          user_id: string
+          video_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          message?: string | null
+          progress?: number
+          status?: string
+          updated_at?: string
+          user_id?: string
+          video_id?: string
+        }
+        Relationships: []
+      }
       transcription_queue: {
         Row: {
           channel_title: string | null

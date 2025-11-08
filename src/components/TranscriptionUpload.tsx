@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { Upload, FileAudio, Loader2, Youtube, AlertTriangle, Shield, Eye, History, CheckCircle2, XCircle, Subtitles, AlertCircle, Search, ExternalLink } from "lucide-react";
 import { calculateFileChecksum } from "@/lib/checksumUtils";
 import { format } from "date-fns";
+import { useTranscriptionProgress } from "@/hooks/useTranscriptionProgress";
 
 interface TranscriptionResult {
   text: string;
@@ -66,6 +67,31 @@ export function TranscriptionUpload() {
       result?: any;
     }
   }>({});
+  
+  // Extract video ID for progress tracking
+  const extractVideoId = (url: string): string | null => {
+    const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/);
+    return match ? match[1] : null;
+  };
+  
+  const currentVideoId = youtubeUrl ? extractVideoId(youtubeUrl) : null;
+  const progressUpdate = useTranscriptionProgress(currentVideoId);
+
+  // Update UI based on progress
+  useEffect(() => {
+    if (progressUpdate && isProcessing) {
+      setProgress(progressUpdate.progress);
+      
+      if (progressUpdate.status === 'completed') {
+        setIsProcessing(false);
+        setProgress(100);
+      } else if (progressUpdate.status === 'failed') {
+        setIsProcessing(false);
+        setProgress(0);
+        toast.error(progressUpdate.message || 'Transcription failed');
+      }
+    }
+  }, [progressUpdate, isProcessing]);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -1223,13 +1249,36 @@ export function TranscriptionUpload() {
               </div>
 
               {isProcessing && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span className="text-sm text-muted-foreground">Downloading and transcribing...</span>
-                  </div>
-                  <Progress value={progress} />
-                </div>
+                <Card className="border-primary">
+                  <CardContent className="pt-6 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span className="text-sm font-medium">
+                        {progressUpdate?.message || 'Processing...'}
+                      </span>
+                    </div>
+                    <Progress value={progress} />
+                    <p className="text-xs text-muted-foreground text-center">
+                      {progress}% complete
+                    </p>
+                    {progressUpdate?.status === 'downloading' && (
+                      <Alert>
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertDescription className="text-xs">
+                          Downloading audio from YouTube... This may take a moment.
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                    {progressUpdate?.status === 'transcribing' && (
+                      <Alert>
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertDescription className="text-xs">
+                          Transcribing audio with AI... Please wait.
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                  </CardContent>
+                </Card>
               )}
 
               <Button
