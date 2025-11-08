@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet, Columns3, HelpCircle, Keyboard, BarChart3, Clock, Calendar, GitCompare, Merge, Sliders, Tag, Plus, X, Edit2, Palette, Star, MessageSquare, BarChart2 } from "lucide-react";
+import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet, Columns3, HelpCircle, Keyboard, BarChart3, Clock, Calendar, GitCompare, Merge, Sliders, Tag, Plus, X, Edit2, Palette, Star, MessageSquare, BarChart2, History } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO, startOfDay, startOfHour, getHours, getDay, startOfWeek, startOfMonth, subDays, endOfDay } from "date-fns";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -17,6 +17,7 @@ import TagUsageHeatmap from "@/components/TagUsageHeatmap";
 import TagUsageStatistics from "@/components/TagUsageStatistics";
 import TagTemplateManager from "@/components/TagTemplateManager";
 import { PresetAnalytics } from "@/components/PresetAnalytics";
+import { PresetVersionHistory } from "@/components/PresetVersionHistory";
 import { cn } from "@/lib/utils";
 
 // Color palette themes for tags
@@ -311,6 +312,8 @@ export default function TranscriptionHistory() {
   const [selectedPresetForComments, setSelectedPresetForComments] = useState<FilterPreset | null>(null);
   const [marketplaceSortBy, setMarketplaceSortBy] = useState<'rating' | 'clones' | 'recent'>('rating');
   const [showPresetAnalytics, setShowPresetAnalytics] = useState(false);
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
+  const [selectedPresetForVersion, setSelectedPresetForVersion] = useState<FilterPreset | null>(null);
 
   // Save filter preferences whenever they change
   useEffect(() => {
@@ -782,6 +785,22 @@ export default function TranscriptionHistory() {
     
     // Track apply event
     await trackPresetUsage(preset.id, 'apply');
+  };
+
+  // Handle version restore
+  const handleVersionRestore = async (version: any) => {
+    // Reload presets to get the updated data
+    const { data } = await supabase
+      .from('filter_presets')
+      .select('*')
+      .eq('user_id', (await supabase.auth.getUser()).data.user?.id || '');
+    
+    if (data) {
+      setFilterPresets(data as FilterPreset[]);
+    }
+    
+    setShowVersionHistory(false);
+    setSelectedPresetForVersion(null);
   };
 
   // Delete a preset
@@ -2967,6 +2986,19 @@ export default function TranscriptionHistory() {
                                   className="h-8 w-8 p-0"
                                   onClick={(e) => {
                                     e.stopPropagation();
+                                    setSelectedPresetForVersion(preset);
+                                    setShowVersionHistory(true);
+                                  }}
+                                  title="View version history"
+                                >
+                                  <History className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
                                     handleDeletePreset(preset.id, preset.name);
                                   }}
                                 >
@@ -5134,6 +5166,18 @@ export default function TranscriptionHistory() {
             </div>
           </DialogContent>
         </Dialog>
+
+        {/* Version History Dialog */}
+        {selectedPresetForVersion && (
+          <PresetVersionHistory
+            presetId={selectedPresetForVersion.id}
+            presetName={selectedPresetForVersion.name}
+            currentFilterData={selectedPresetForVersion.filter_data}
+            open={showVersionHistory}
+            onOpenChange={setShowVersionHistory}
+            onRestore={handleVersionRestore}
+          />
+        )}
       </div>
     );
   }

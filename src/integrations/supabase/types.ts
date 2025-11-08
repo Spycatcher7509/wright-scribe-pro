@@ -185,6 +185,50 @@ export type Database = {
           },
         ]
       }
+      preset_versions: {
+        Row: {
+          change_summary: string | null
+          created_at: string
+          created_by: string
+          description: string | null
+          filter_data: Json
+          id: string
+          name: string
+          preset_id: string
+          version_number: number
+        }
+        Insert: {
+          change_summary?: string | null
+          created_at?: string
+          created_by: string
+          description?: string | null
+          filter_data: Json
+          id?: string
+          name: string
+          preset_id: string
+          version_number: number
+        }
+        Update: {
+          change_summary?: string | null
+          created_at?: string
+          created_by?: string
+          description?: string | null
+          filter_data?: Json
+          id?: string
+          name?: string
+          preset_id?: string
+          version_number?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "preset_versions_preset_id_fkey"
+            columns: ["preset_id"]
+            isOneToOne: false
+            referencedRelation: "filter_presets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           created_at: string
