@@ -177,11 +177,12 @@ async function runCleanupForUser(supabase: any, config: CleanupConfig) {
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - config.delete_older_than_days);
 
-  // Fetch all transcription logs for this user
+  // Fetch all transcription logs for this user (excluding protected files)
   const { data: logs, error: logsError } = await supabase
     .from('transcription_logs')
     .select('*')
-    .eq('user_id', config.user_id);
+    .eq('user_id', config.user_id)
+    .eq('is_protected', false);
 
   if (logsError) {
     throw new Error(`Failed to fetch logs: ${logsError.message}`);

@@ -89,11 +89,12 @@ serve(async (req) => {
     cutoffDate.setDate(cutoffDate.getDate() - cleanupConfig.delete_older_than_days);
     console.log(`Cutoff date: ${cutoffDate.toISOString()}`);
 
-    // Get all transcriptions for the user
+    // Get all transcriptions for the user (excluding protected files)
     const { data: allLogs, error: logsError } = await supabase
       .from("transcription_logs")
-      .select("id, user_id, file_checksum, created_at, file_title, file_path")
+      .select("id, user_id, file_checksum, created_at, file_title, file_path, is_protected")
       .eq("user_id", user.id)
+      .eq("is_protected", false)
       .not("file_checksum", "is", null)
       .order("created_at", { ascending: false });
 

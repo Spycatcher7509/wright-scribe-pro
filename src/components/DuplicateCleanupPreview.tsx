@@ -1,10 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Loader2, FileText, Check, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Loader2, FileText, Check, X, Shield, ShieldOff } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { toast } from "sonner";
 
 interface DuplicateCleanupPreviewProps {
   keepLatest: boolean;
@@ -18,16 +20,18 @@ interface DuplicateGroup {
     id: string;
     file_title: string;
     created_at: string;
+    is_protected: boolean;
     willBeDeleted: boolean;
     reason: string;
   }>;
 }
 
-export function DuplicateCleanupPreview({ 
+export function DuplicateCleanupPreview({
   keepLatest, 
   deleteOlderThanDays,
   enabled 
 }: DuplicateCleanupPreviewProps) {
+  const queryClient = useQueryClient();
   const { data: duplicates, isLoading } = useQuery({
     queryKey: ["cleanup-preview", keepLatest, deleteOlderThanDays],
     queryFn: async () => {
@@ -37,7 +41,7 @@ export function DuplicateCleanupPreview({
       // Fetch all transcriptions with checksums
       const { data: transcriptions, error } = await supabase
         .from("transcription_logs")
-        .select("id, file_title, file_checksum, created_at")
+        .select("id, file_title, file_checksum, created_at, is_protected")
         .eq("user_id", user.id)
         .not("file_checksum", "is", null)
         .order("created_at", { ascending: false });
@@ -72,11 +76,14 @@ export function DuplicateCleanupPreview({
           const fileDate = new Date(file.created_at);
           const isOldEnough = fileDate < cutoffDate;
           const isLatest = index === 0;
+          const isProtected = file.is_protected || false;
           
           let willBeDeleted = false;
           let reason = "";
 
-          if (!isOldEnough) {
+          if (isProtected) {
+            reason = "Protected from deletion";
+          } else if (!isOldEnough) {
             reason = "Too recent to delete";
           } else if (keepLatest && isLatest) {
             reason = "Newest duplicate (kept)";
@@ -89,6 +96,7 @@ export function DuplicateCleanupPreview({
             id: file.id,
             file_title: file.file_title,
             created_at: file.created_at,
+            is_protected: isProtected,
             willBeDeleted,
             reason,
           };
@@ -109,6 +117,29 @@ export function DuplicateCleanupPreview({
     (sum, group) => sum + group.files.filter(f => f.willBeDeleted).length,
     0
   ) || 0;
+
+  const totalProtected = duplicates?.reduce(
+    (sum, group) => sum + group.files.filter(f => f.is_protected).length,
+    0
+  ) || 0;
+
+  const toggleProtectionMutation = useMutation({
+    mutationFn: async ({ id, isProtected }: { id: string; isProtected: boolean }) => {
+      const { error } = await supabase
+        .from("transcription_logs")
+        .update({ is_protected: !isProtected })
+        .eq("id", id);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["cleanup-preview"] });
+      toast.success("File protection updated");
+    },
+    onError: (error: any) => {
+      toast.error("Failed to update protection: " + error.message);
+    },
+  });
 
   if (isLoading) {
     return (
@@ -143,11 +174,19 @@ export function DuplicateCleanupPreview({
               Files that would be affected by cleanup
             </CardDescription>
           </div>
-          {totalToDelete > 0 && (
-            <Badge variant="destructive" className="text-sm">
-              {totalToDelete} file{totalToDelete !== 1 ? 's' : ''} to delete
-            </Badge>
-          )}
+          <div className="flex items-center gap-2">
+            {totalProtected > 0 && (
+              <Badge variant="secondary" className="text-sm">
+                <Shield className="h-3 w-3 mr-1" />
+                {totalProtected} protected
+              </Badge>
+            )}
+            {totalToDelete > 0 && (
+              <Badge variant="destructive" className="text-sm">
+                {totalToDelete} to delete
+              </Badge>
+            )}
+          </div>
         </div>
       </CardHeader>
       <CardContent>
@@ -179,7 +218,9 @@ export function DuplicateCleanupPreview({
                       <div
                         key={file.id}
                         className={`flex items-start justify-between p-3 rounded-md border ${
-                          file.willBeDeleted 
+                          file.is_protected
+                            ? 'bg-primary/5 border-primary/20'
+                            : file.willBeDeleted 
                             ? 'bg-destructive/5 border-destructive/20' 
                             : 'bg-muted/30 border-border'
                         }`}
@@ -193,6 +234,22 @@ export function DuplicateCleanupPreview({
                           </p>
                         </div>
                         <div className="flex items-center gap-2 ml-3">
+                          <Button
+                            variant={file.is_protected ? "default" : "ghost"}
+                            size="sm"
+                            onClick={() => toggleProtectionMutation.mutate({ 
+                              id: file.id, 
+                              isProtected: file.is_protected 
+                            })}
+                            disabled={toggleProtectionMutation.isPending}
+                            className="h-7 px-2"
+                          >
+                            {file.is_protected ? (
+                              <Shield className="h-3 w-3" />
+                            ) : (
+                              <ShieldOff className="h-3 w-3" />
+                            )}
+                          </Button>
                           {file.willBeDeleted ? (
                             <>
                               <X className="h-4 w-4 text-destructive flex-shrink-0" />

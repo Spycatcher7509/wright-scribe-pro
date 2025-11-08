@@ -569,6 +569,7 @@ export type Database = {
           file_path: string | null
           file_title: string
           id: string
+          is_protected: boolean
           log_time: string
           status: string
           transcription_text: string | null
@@ -581,6 +582,7 @@ export type Database = {
           file_path?: string | null
           file_title: string
           id?: string
+          is_protected?: boolean
           log_time?: string
           status: string
           transcription_text?: string | null
@@ -593,6 +595,7 @@ export type Database = {
           file_path?: string | null
           file_title?: string
           id?: string
+          is_protected?: boolean
           log_time?: string
           status?: string
           transcription_text?: string | null
