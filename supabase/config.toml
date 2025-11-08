@@ -11,3 +11,6 @@ verify_jwt = true
 
 [functions.transcribe-youtube]
 verify_jwt = true
+
+[functions.scheduled-cleanup]
+verify_jwt = false
