@@ -189,9 +189,24 @@ export default function TranscriptionHistory() {
   }, [searchQuery, contentSearchQuery, startDate, endDate, selectedStatuses, pageSize, sortField, sortDirection, visibleColumns, lengthRange, showAdvancedFilters]);
 
 
+  // Fetch tags
+  const fetchTags = async () => {
+    const { data, error } = await supabase
+      .from("tags")
+      .select("*")
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.error("Error fetching tags:", error);
+    } else {
+      setTags(data || []);
+    }
+  };
+
   useEffect(() => {
     checkAuth();
     fetchLogs();
+    fetchTags();
 
     // Set up realtime subscription
     const channel = supabase
@@ -273,15 +288,26 @@ export default function TranscriptionHistory() {
     setIsLoading(true);
     const { data, error } = await supabase
       .from("transcription_logs")
-      .select("*")
+      .select(`
+        *,
+        transcription_tags (
+          tag_id,
+          tags (*)
+        )
+      `)
       .order("created_at", { ascending: false });
 
     if (error) {
       console.error("Error fetching logs:", error);
       toast.error("Failed to load transcription history");
     } else {
-      setLogs(data || []);
-      setFilteredLogs(data || []);
+      // Transform the data to include tags
+      const logsWithTags = data?.map(log => ({
+        ...log,
+        tags: log.transcription_tags?.map((tt: any) => tt.tags).filter(Boolean) || []
+      })) || [];
+      setLogs(logsWithTags);
+      setFilteredLogs(logsWithTags);
       setLastUpdated(new Date());
     }
     setIsLoading(false);
@@ -796,6 +822,94 @@ export default function TranscriptionHistory() {
       console.error('Error exporting to CSV:', error);
       toast.error('Failed to export CSV');
     }
+  };
+
+  // Tag management handlers
+  const handleCreateTag = async () => {
+    if (!newTagName.trim()) {
+      toast.error("Tag name cannot be empty");
+      return;
+    }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { error } = await supabase
+      .from("tags")
+      .insert([{ name: newTagName.trim(), color: newTagColor, user_id: user.id }]);
+
+    if (error) {
+      console.error("Error creating tag:", error);
+      toast.error("Failed to create tag");
+    } else {
+      toast.success("Tag created successfully");
+      setNewTagName('');
+      setNewTagColor('#3b82f6');
+      setShowTagDialog(false);
+      fetchTags();
+    }
+  };
+
+  const handleEditTag = async () => {
+    if (!editingTag || !newTagName.trim()) {
+      toast.error("Tag name cannot be empty");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("tags")
+      .update({ name: newTagName.trim(), color: newTagColor })
+      .eq("id", editingTag.id);
+
+    if (error) {
+      console.error("Error updating tag:", error);
+      toast.error("Failed to update tag");
+    } else {
+      toast.success("Tag updated successfully");
+      setEditingTag(null);
+      setNewTagName('');
+      setNewTagColor('#3b82f6');
+      setShowTagDialog(false);
+      fetchTags();
+      fetchLogs(); // Refresh logs to show updated tag names
+    }
+  };
+
+  const handleDeleteTag = async (tagId: string) => {
+    const { error } = await supabase
+      .from("tags")
+      .delete()
+      .eq("id", tagId);
+
+    if (error) {
+      console.error("Error deleting tag:", error);
+      toast.error("Failed to delete tag");
+    } else {
+      toast.success("Tag deleted successfully");
+      fetchTags();
+      fetchLogs(); // Refresh logs to remove deleted tags
+    }
+  };
+
+  const openCreateTagDialog = () => {
+    setTagDialogMode('create');
+    setNewTagName('');
+    setNewTagColor('#3b82f6');
+    setEditingTag(null);
+    setShowTagDialog(true);
+  };
+
+  const openEditTagDialog = (tag: Tag) => {
+    setTagDialogMode('edit');
+    setEditingTag(tag);
+    setNewTagName(tag.name);
+    setNewTagColor(tag.color);
+    setShowTagDialog(true);
+  };
+
+  const openManageTagsDialog = () => {
+    setTagDialogMode('manage');
+    setShowTagDialog(true);
   };
 
   const handlePageSizeChange = (value: string) => {
@@ -1591,6 +1705,15 @@ export default function TranscriptionHistory() {
                   </PopoverContent>
                 </Popover>
 
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={openManageTagsDialog}
+                >
+                  <Tag className="mr-2 h-4 w-4" />
+                  Manage Tags ({tags.length})
+                </Button>
+
                 {selectedIds.size > 0 && (
                   <Button 
                     variant="default" 
@@ -2083,6 +2206,144 @@ export default function TranscriptionHistory() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Tag Management Dialog */}
+      <Dialog open={showTagDialog} onOpenChange={setShowTagDialog}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Tag className="h-5 w-5" />
+              {tagDialogMode === 'create' && 'Create New Tag'}
+              {tagDialogMode === 'edit' && 'Edit Tag'}
+              {tagDialogMode === 'manage' && 'Manage Tags'}
+            </DialogTitle>
+            <DialogDescription>
+              {tagDialogMode === 'create' && 'Create a custom tag to organize your transcriptions'}
+              {tagDialogMode === 'edit' && 'Update tag name and color'}
+              {tagDialogMode === 'manage' && 'View and manage all your tags'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {tagDialogMode === 'manage' ? (
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-muted-foreground">
+                  {tags.length} tag{tags.length !== 1 ? 's' : ''}
+                </span>
+                <Button size="sm" onClick={openCreateTagDialog}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Tag
+                </Button>
+              </div>
+
+              {tags.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Tag className="h-12 w-12 mx-auto mb-2 opacity-20" />
+                  <p>No tags created yet</p>
+                  <p className="text-sm">Create your first tag to get started</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {tags.map((tag) => (
+                    <div
+                      key={tag.id}
+                      className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="w-4 h-4 rounded"
+                          style={{ backgroundColor: tag.color }}
+                        />
+                        <span className="font-medium">{tag.name}</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => openEditTagDialog(tag)}
+                        >
+                          <Edit2 className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDeleteTag(tag.id)}
+                          className="text-destructive hover:text-destructive"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="tag-name">Tag Name</Label>
+                <Input
+                  id="tag-name"
+                  placeholder="e.g., Meeting, Interview, Lecture"
+                  value={newTagName}
+                  onChange={(e) => setNewTagName(e.target.value)}
+                  maxLength={50}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="tag-color">Tag Color</Label>
+                <div className="flex items-center gap-4">
+                  <Input
+                    id="tag-color"
+                    type="color"
+                    value={newTagColor}
+                    onChange={(e) => setNewTagColor(e.target.value)}
+                    className="w-24 h-10 cursor-pointer"
+                  />
+                  <div className="flex items-center gap-2">
+                    <div
+                      className="w-8 h-8 rounded border"
+                      style={{ backgroundColor: newTagColor }}
+                    />
+                    <span className="text-sm text-muted-foreground">{newTagColor}</span>
+                  </div>
+                </div>
+                <div className="flex gap-2 mt-2">
+                  {['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'].map((color) => (
+                    <button
+                      key={color}
+                      className="w-8 h-8 rounded border-2 border-transparent hover:border-foreground transition-colors"
+                      style={{ backgroundColor: color }}
+                      onClick={() => setNewTagColor(color)}
+                      title={color}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowTagDialog(false);
+                    setNewTagName('');
+                    setNewTagColor('#3b82f6');
+                    setEditingTag(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={tagDialogMode === 'create' ? handleCreateTag : handleEditTag}
+                >
+                  {tagDialogMode === 'create' ? 'Create Tag' : 'Save Changes'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Comparison Dialog */}
       <Dialog open={showCompareDialog} onOpenChange={(open) => {
