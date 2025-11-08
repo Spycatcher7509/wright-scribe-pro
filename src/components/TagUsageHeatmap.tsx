@@ -1,9 +1,8 @@
 import { useMemo, useRef } from "react";
-import { format, getDay, getHours } from "date-fns";
+import { getDay, getHours } from "date-fns";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Download, FileSpreadsheet } from "lucide-react";
-import html2canvas from "html2canvas";
 import { toast } from "sonner";
 
 interface Tag {
@@ -106,9 +105,12 @@ export default function TagUsageHeatmap({ logs, selectedTags = [] }: TagUsageHea
     try {
       toast.info('Generating image...');
       
+      // Dynamically import html2canvas to avoid circular dependency
+      const html2canvas = (await import('html2canvas')).default;
+      
       const canvas = await html2canvas(heatmapRef.current, {
         backgroundColor: '#ffffff',
-        scale: 2, // Higher quality
+        scale: 2,
       });
 
       canvas.toBlob((blob) => {
