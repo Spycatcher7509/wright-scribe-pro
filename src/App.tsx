@@ -12,6 +12,7 @@ import ChangePassword from "./pages/ChangePassword";
 import Profile from "./pages/Profile";
 import NotificationSettings from "./pages/NotificationSettings";
 import AdminActivityDashboard from "./pages/AdminActivityDashboard";
+import AdminTranscriptionAnalytics from "./pages/AdminTranscriptionAnalytics";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -32,6 +33,7 @@ const App = () => (
             <Route path="/profile" element={<Profile />} />
             <Route path="/notifications" element={<NotificationSettings />} />
             <Route path="/admin/activity" element={<AdminActivityDashboard />} />
+            <Route path="/admin/analytics" element={<AdminTranscriptionAnalytics />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
