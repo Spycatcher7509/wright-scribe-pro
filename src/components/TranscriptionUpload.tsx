@@ -25,6 +25,7 @@ export function TranscriptionUpload() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<TranscriptionResult | null>(null);
+  const [mode, setMode] = useState<'transcribe' | 'translate'>('transcribe');
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -76,7 +77,8 @@ export function TranscriptionUpload() {
       formData.append("file", file);
       formData.append("fileName", file.name);
 
-      const { data, error } = await supabase.functions.invoke("transcribe-audio", {
+      const functionName = mode === 'translate' ? 'translate-audio' : 'transcribe-audio';
+      const { data, error } = await supabase.functions.invoke(functionName, {
         body: formData,
       });
 
@@ -98,10 +100,16 @@ export function TranscriptionUpload() {
         logId: data.logId,
       });
 
-      toast.success("Transcription completed successfully!");
+      const successMessage = mode === 'translate' 
+        ? 'Translation completed successfully!' 
+        : 'Transcription completed successfully!';
+      toast.success(successMessage);
     } catch (error: any) {
-      console.error("Transcription error:", error);
-      toast.error(error.message || "Failed to transcribe audio");
+      console.error('Processing error:', error);
+      const errorMessage = mode === 'translate' 
+        ? 'Failed to translate audio' 
+        : 'Failed to transcribe audio';
+      toast.error(error.message || errorMessage);
     } finally {
       setIsProcessing(false);
       setProgress(0);
@@ -167,15 +175,16 @@ export function TranscriptionUpload() {
     setYoutubeUrl("");
     setResult(null);
     setProgress(0);
+    setMode('transcribe');
   };
 
   return (
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Transcribe Audio</CardTitle>
+          <CardTitle>Transcribe or Translate Audio</CardTitle>
           <CardDescription>
-            Upload a file or paste a YouTube URL to transcribe
+            Upload a file or paste a YouTube URL to transcribe or translate to English
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -209,7 +218,8 @@ export function TranscriptionUpload() {
               </div>
 
               {file && (
-                <div className="flex items-center gap-2 p-3 bg-muted rounded-md">
+                <>
+                  <div className="flex items-center gap-2 p-3 bg-muted rounded-md">
                   <FileAudio className="h-5 w-5 text-muted-foreground" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{file.name}</p>
@@ -218,6 +228,36 @@ export function TranscriptionUpload() {
                     </p>
                   </div>
                 </div>
+
+                <div className="space-y-2">
+                  <Label>Mode</Label>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant={mode === 'transcribe' ? 'default' : 'outline'}
+                      onClick={() => setMode('transcribe')}
+                      disabled={isProcessing}
+                      className="flex-1"
+                    >
+                      Transcribe
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={mode === 'translate' ? 'default' : 'outline'}
+                      onClick={() => setMode('translate')}
+                      disabled={isProcessing}
+                      className="flex-1"
+                    >
+                      Translate to English
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {mode === 'transcribe' 
+                      ? 'Keep the original language' 
+                      : 'Translate any language to English'}
+                  </p>
+                </div>
+              </>
               )}
 
               {isProcessing && (
@@ -238,12 +278,12 @@ export function TranscriptionUpload() {
                 {isProcessing ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Transcribing...
+                    {mode === 'translate' ? 'Translating...' : 'Transcribing...'}
                   </>
                 ) : (
                   <>
                     <Upload className="mr-2 h-4 w-4" />
-                    Transcribe Audio
+                    {mode === 'translate' ? 'Translate Audio' : 'Transcribe Audio'}
                   </>
                 )}
               </Button>
@@ -326,13 +366,16 @@ export function TranscriptionUpload() {
       {result && (
         <Card>
           <CardHeader>
-            <CardTitle>Transcription Result</CardTitle>
+            <CardTitle>
+              {mode === 'translate' ? 'Translation Result' : 'Transcription Result'}
+            </CardTitle>
             {result.title && (
               <CardDescription className="font-medium">{result.title}</CardDescription>
             )}
             {result.duration && (
               <CardDescription>
                 Duration: {Math.round(result.duration)}s | Language: {result.language || "Unknown"}
+                {mode === 'translate' && ' (translated to English)'}
               </CardDescription>
             )}
           </CardHeader>
