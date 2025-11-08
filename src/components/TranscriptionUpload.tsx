@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { Upload, FileAudio, Loader2, Youtube } from "lucide-react";
 
@@ -20,6 +21,7 @@ interface TranscriptionResult {
 export function TranscriptionUpload() {
   const [file, setFile] = useState<File | null>(null);
   const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [downloadVideo, setDownloadVideo] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<TranscriptionResult | null>(null);
@@ -128,7 +130,7 @@ export function TranscriptionUpload() {
       }, 500);
 
       const { data, error } = await supabase.functions.invoke("transcribe-youtube", {
-        body: { youtubeUrl },
+        body: { youtubeUrl, downloadVideo },
       });
 
       clearInterval(progressInterval);
@@ -272,6 +274,21 @@ export function TranscriptionUpload() {
                 <p className="text-xs text-muted-foreground">
                   Paste a YouTube video URL to extract and transcribe the audio
                 </p>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <Checkbox 
+                  id="download-video" 
+                  checked={downloadVideo}
+                  onCheckedChange={(checked) => setDownloadVideo(checked as boolean)}
+                  disabled={isProcessing}
+                />
+                <Label 
+                  htmlFor="download-video" 
+                  className="text-sm font-normal cursor-pointer"
+                >
+                  Download video file
+                </Label>
               </div>
 
               {isProcessing && (
