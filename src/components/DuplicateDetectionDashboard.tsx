@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import JSZip from "jszip";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +16,10 @@ import {
   Clock,
   Merge,
   Download,
-  Eye
+  Eye,
+  FileDown,
+  FileJson,
+  FileSpreadsheet
 } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
@@ -27,6 +31,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -203,6 +215,328 @@ export function DuplicateDetectionDashboard({ logs, onRefresh }: DuplicateDetect
     }
   };
 
+  const generateRecommendations = (group: DuplicateGroup): string[] => {
+    const recommendations: string[] = [];
+    
+    if (group.count > 5) {
+      recommendations.push(`HIGH PRIORITY: ${group.count} versions detected - significant cleanup opportunity`);
+    } else if (group.count > 3) {
+      recommendations.push(`MEDIUM PRIORITY: ${group.count} versions detected - consider cleanup`);
+    } else {
+      recommendations.push(`LOW PRIORITY: ${group.count} versions detected`);
+    }
+
+    if (group.wastedSpace > 100000) {
+      recommendations.push(`Large storage waste: ${formatBytes(group.wastedSpace)} can be recovered`);
+    }
+
+    const daysDiff = Math.floor(
+      (new Date(group.newestDate).getTime() - new Date(group.oldestDate).getTime()) / (1000 * 60 * 60 * 24)
+    );
+    
+    if (daysDiff > 30) {
+      recommendations.push(`Old duplicates: Versions span ${daysDiff} days - likely safe to keep only latest`);
+    }
+
+    // Check if all versions have same status
+    const allCompleted = group.files.every(f => f.status === 'completed');
+    if (allCompleted) {
+      recommendations.push(`All versions completed successfully - safe to delete older versions`);
+    } else {
+      recommendations.push(`Some versions failed - review before deletion`);
+    }
+
+    return recommendations;
+  };
+
+  const exportAsCSV = () => {
+    try {
+      const headers = [
+        'File Title',
+        'Checksum',
+        'Total Versions',
+        'Wasted Space',
+        'Wasted Space (Bytes)',
+        'Oldest Version',
+        'Newest Version',
+        'Priority',
+        'Recommendations'
+      ];
+
+      const rows = duplicateGroups.map(group => {
+        const recommendations = generateRecommendations(group);
+        const priority = group.count > 5 ? 'HIGH' : group.count > 3 ? 'MEDIUM' : 'LOW';
+        
+        return [
+          `"${group.files[0].file_title.replace(/"/g, '""')}"`,
+          group.checksum,
+          group.count,
+          formatBytes(group.wastedSpace),
+          group.wastedSpace * 2, // Approximate bytes (2 bytes per char)
+          format(new Date(group.oldestDate), 'yyyy-MM-dd HH:mm:ss'),
+          format(new Date(group.newestDate), 'yyyy-MM-dd HH:mm:ss'),
+          priority,
+          `"${recommendations.join('; ').replace(/"/g, '""')}"`
+        ];
+      });
+
+      const csvContent = [
+        headers.join(','),
+        ...rows.map(row => row.join(','))
+      ].join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `deduplication_report_${format(new Date(), 'yyyy-MM-dd_HHmmss')}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+
+      toast.success('CSV report exported successfully');
+    } catch (error) {
+      console.error('Error exporting CSV:', error);
+      toast.error('Failed to export CSV report');
+    }
+  };
+
+  const exportAsJSON = () => {
+    try {
+      const report = {
+        generated_at: new Date().toISOString(),
+        summary: {
+          total_duplicate_groups: stats.uniqueDuplicates,
+          total_extra_copies: stats.totalDuplicates,
+          total_wasted_space: formatBytes(stats.totalWastedSpace),
+          total_wasted_bytes: stats.totalWastedSpace * 2,
+          percentage_duplicates: stats.percentageDuplicates,
+        },
+        duplicate_groups: duplicateGroups.map(group => ({
+          file_title: group.files[0].file_title,
+          checksum: group.checksum,
+          total_versions: group.count,
+          wasted_space: formatBytes(group.wastedSpace),
+          wasted_bytes: group.wastedSpace * 2,
+          oldest_version: group.oldestDate,
+          newest_version: group.newestDate,
+          priority: group.count > 5 ? 'HIGH' : group.count > 3 ? 'MEDIUM' : 'LOW',
+          recommendations: generateRecommendations(group),
+          versions: group.files.map((file, index) => ({
+            version_number: group.count - index,
+            id: file.id,
+            status: file.status,
+            created_at: file.created_at,
+            size_chars: file.transcription_text?.length || 0,
+            is_latest: index === 0,
+            tags: file.tags?.map(t => t.name) || []
+          }))
+        }))
+      };
+
+      const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `deduplication_report_${format(new Date(), 'yyyy-MM-dd_HHmmss')}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+
+      toast.success('JSON report exported successfully');
+    } catch (error) {
+      console.error('Error exporting JSON:', error);
+      toast.error('Failed to export JSON report');
+    }
+  };
+
+  const exportAsMarkdown = () => {
+    try {
+      let content = '# Deduplication Report\n\n';
+      content += `**Generated:** ${format(new Date(), 'MMMM dd, yyyy HH:mm:ss')}\n\n`;
+      
+      content += '## Summary\n\n';
+      content += `- **Total Duplicate Groups:** ${stats.uniqueDuplicates}\n`;
+      content += `- **Total Extra Copies:** ${stats.totalDuplicates}\n`;
+      content += `- **Wasted Space:** ${formatBytes(stats.totalWastedSpace)}\n`;
+      content += `- **Percentage of Files:** ${stats.percentageDuplicates}%\n\n`;
+
+      content += '## Recommendations\n\n';
+      content += '### Overall Strategy\n\n';
+      content += '1. **High Priority Groups:** Focus on groups with 5+ versions first\n';
+      content += '2. **Safety First:** Always keep the latest version unless there\'s a specific reason not to\n';
+      content += '3. **Tag Preservation:** Use the "Merge Tags" feature before deletion to preserve metadata\n';
+      content += '4. **Review Failed Versions:** Check error messages before deleting failed versions\n\n';
+
+      content += `### Potential Savings\n\n`;
+      content += `By removing all duplicate files, you can recover **${formatBytes(stats.totalWastedSpace)}** of storage space.\n\n`;
+
+      content += '## Duplicate Groups\n\n';
+      
+      duplicateGroups.forEach((group, index) => {
+        const recommendations = generateRecommendations(group);
+        const priority = group.count > 5 ? 'HIGH' : group.count > 3 ? 'MEDIUM' : 'LOW';
+        
+        content += `### ${index + 1}. ${group.files[0].file_title}\n\n`;
+        content += `- **Checksum:** \`${group.checksum}\`\n`;
+        content += `- **Total Versions:** ${group.count}\n`;
+        content += `- **Priority:** ${priority}\n`;
+        content += `- **Wasted Space:** ${formatBytes(group.wastedSpace)}\n`;
+        content += `- **Date Range:** ${format(new Date(group.oldestDate), 'MMM dd, yyyy')} - ${format(new Date(group.newestDate), 'MMM dd, yyyy')}\n\n`;
+        
+        content += '**Recommendations:**\n\n';
+        recommendations.forEach(rec => {
+          content += `- ${rec}\n`;
+        });
+        content += '\n';
+
+        content += '**Versions:**\n\n';
+        content += '| Version | Created | Status | Size | Tags |\n';
+        content += '|---------|---------|--------|------|------|\n';
+        
+        group.files.forEach((file, idx) => {
+          const versionNum = group.count - idx;
+          const versionLabel = idx === 0 ? `${versionNum} (Latest)` : versionNum.toString();
+          const tags = file.tags?.map(t => t.name).join(', ') || 'None';
+          content += `| ${versionLabel} | ${format(new Date(file.created_at), 'MMM dd, yyyy HH:mm')} | ${file.status} | ${file.transcription_text?.length.toLocaleString() || 0} chars | ${tags} |\n`;
+        });
+        
+        content += '\n---\n\n';
+      });
+
+      content += '## Action Plan\n\n';
+      content += '### Immediate Actions (High Priority)\n\n';
+      const highPriority = duplicateGroups.filter(g => g.count > 5);
+      if (highPriority.length > 0) {
+        highPriority.forEach((group, index) => {
+          content += `${index + 1}. **${group.files[0].file_title}** - ${group.count} versions, ${formatBytes(group.wastedSpace)} to recover\n`;
+        });
+      } else {
+        content += 'No high priority items found.\n';
+      }
+      content += '\n';
+
+      content += '### Medium Priority\n\n';
+      const mediumPriority = duplicateGroups.filter(g => g.count > 3 && g.count <= 5);
+      if (mediumPriority.length > 0) {
+        mediumPriority.forEach((group, index) => {
+          content += `${index + 1}. **${group.files[0].file_title}** - ${group.count} versions, ${formatBytes(group.wastedSpace)} to recover\n`;
+        });
+      } else {
+        content += 'No medium priority items found.\n';
+      }
+      content += '\n';
+
+      content += '## Notes\n\n';
+      content += '- This report was automatically generated based on file checksums\n';
+      content += '- Files with identical checksums are guaranteed to be exact duplicates\n';
+      content += '- Always review the latest version before deleting older versions\n';
+      content += '- Consider backing up important files before mass deletion\n';
+
+      const blob = new Blob([content], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `deduplication_report_${format(new Date(), 'yyyy-MM-dd_HHmmss')}.md`;
+      link.click();
+      URL.revokeObjectURL(url);
+
+      toast.success('Markdown report exported successfully');
+    } catch (error) {
+      console.error('Error exporting Markdown:', error);
+      toast.error('Failed to export Markdown report');
+    }
+  };
+
+  const exportComprehensiveReport = async () => {
+    try {
+      const zip = new JSZip();
+      
+      // Generate all report formats
+      const csvHeaders = [
+        'File Title', 'Checksum', 'Total Versions', 'Wasted Space', 
+        'Oldest Version', 'Newest Version', 'Priority', 'Recommendations'
+      ];
+      
+      const csvRows = duplicateGroups.map(group => {
+        const recommendations = generateRecommendations(group);
+        const priority = group.count > 5 ? 'HIGH' : group.count > 3 ? 'MEDIUM' : 'LOW';
+        return [
+          `"${group.files[0].file_title.replace(/"/g, '""')}"`,
+          group.checksum,
+          group.count,
+          formatBytes(group.wastedSpace),
+          format(new Date(group.oldestDate), 'yyyy-MM-dd HH:mm:ss'),
+          format(new Date(group.newestDate), 'yyyy-MM-dd HH:mm:ss'),
+          priority,
+          `"${recommendations.join('; ').replace(/"/g, '""')}"`
+        ].join(',');
+      });
+      
+      const csvContent = [csvHeaders.join(','), ...csvRows].join('\n');
+      zip.file('deduplication_report.csv', csvContent);
+
+      // Add JSON report
+      const jsonReport = {
+        generated_at: new Date().toISOString(),
+        summary: {
+          total_duplicate_groups: stats.uniqueDuplicates,
+          total_extra_copies: stats.totalDuplicates,
+          total_wasted_space: formatBytes(stats.totalWastedSpace),
+          percentage_duplicates: stats.percentageDuplicates,
+        },
+        duplicate_groups: duplicateGroups.map(group => ({
+          file_title: group.files[0].file_title,
+          checksum: group.checksum,
+          total_versions: group.count,
+          wasted_space: formatBytes(group.wastedSpace),
+          recommendations: generateRecommendations(group),
+        }))
+      };
+      zip.file('deduplication_report.json', JSON.stringify(jsonReport, null, 2));
+
+      // Add README
+      const readme = `# Deduplication Report Package
+
+This package contains a comprehensive deduplication analysis of your transcription files.
+
+## Contents
+
+- **deduplication_report.csv** - Spreadsheet format for easy analysis in Excel/Google Sheets
+- **deduplication_report.json** - Machine-readable format for automated processing
+- **deduplication_report.md** - Human-readable report with recommendations
+- **README.md** - This file
+
+## Summary
+
+- Total Duplicate Groups: ${stats.uniqueDuplicates}
+- Total Extra Copies: ${stats.totalDuplicates}
+- Potential Space Recovery: ${formatBytes(stats.totalWastedSpace)}
+
+## Next Steps
+
+1. Review the Markdown report for detailed recommendations
+2. Use the CSV file to analyze duplicates in a spreadsheet
+3. Use the JSON file for automated processing
+
+Generated: ${format(new Date(), 'MMMM dd, yyyy HH:mm:ss')}
+`;
+      zip.file('README.md', readme);
+
+      // Generate and download ZIP
+      const content = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(content);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `deduplication_report_${format(new Date(), 'yyyy-MM-dd_HHmmss')}.zip`;
+      link.click();
+      URL.revokeObjectURL(url);
+
+      toast.success('Comprehensive report package exported successfully');
+    } catch (error) {
+      console.error('Error exporting comprehensive report:', error);
+      toast.error('Failed to export comprehensive report');
+    }
+  };
+
   const handleMergeTags = async (group: DuplicateGroup) => {
     try {
       // Collect all unique tags from all versions
@@ -251,6 +585,45 @@ export function DuplicateDetectionDashboard({ logs, onRefresh }: DuplicateDetect
 
   return (
     <div className="space-y-6">
+      {/* Export Actions */}
+      <div className="flex justify-between items-center">
+        <div>
+          <h3 className="text-lg font-semibold">Duplicate File Analysis</h3>
+          <p className="text-sm text-muted-foreground">
+            Review and manage duplicate files detected by checksum verification
+          </p>
+        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button>
+              <Download className="h-4 w-4 mr-2" />
+              Export Report
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel>Export Format</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={exportAsCSV}>
+              <FileSpreadsheet className="h-4 w-4 mr-2" />
+              Export as CSV
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={exportAsJSON}>
+              <FileJson className="h-4 w-4 mr-2" />
+              Export as JSON
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={exportAsMarkdown}>
+              <FileDown className="h-4 w-4 mr-2" />
+              Export as Markdown
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={exportComprehensiveReport}>
+              <Download className="h-4 w-4 mr-2" />
+              Export All Formats (ZIP)
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
       {/* Statistics Overview */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
