@@ -561,15 +561,34 @@ export function TranscriptionUpload() {
       return;
     }
 
-    // Block transcription if captions aren't available (unless force override is enabled)
-    if (captionStatus.available === false && !forceTranscribe) {
-      toast.error("This video doesn't have captions. Please select a video with captions/subtitles or use the 'Force Transcribe' option.");
+    // If caption check hasn't run yet, trigger it and wait
+    if (captionStatus.available === null && !captionStatus.checking && !forceTranscribe) {
+      toast.info("Checking if video has captions...");
+      setCaptionStatus({ checking: true, available: null });
+      
+      try {
+        await checkCaptionAvailability(youtubeUrl);
+        // After check completes, the user needs to click transcribe again
+        toast.success("Caption check complete. Click 'Transcribe' again to continue.");
+        return;
+      } catch (error) {
+        toast.error("Failed to check captions. Please try again.");
+        setCaptionStatus({ checking: false, available: null });
+        return;
+      }
+    }
+
+    // Wait for ongoing caption check to complete
+    if (captionStatus.checking && !forceTranscribe) {
+      toast.warning("Caption check in progress... Please wait a moment.");
       return;
     }
 
-    // Wait for caption check to complete
-    if (captionStatus.available === null && !captionStatus.checking && !forceTranscribe) {
-      toast.warning("Checking caption availability... Please wait.");
+    // Block transcription if captions aren't available (unless force override is enabled)
+    if (captionStatus.available === false && !forceTranscribe) {
+      toast.error("⚠️ This video doesn't have captions/subtitles. Only videos with captions can be transcribed.", {
+        duration: 5000,
+      });
       return;
     }
 
@@ -1252,10 +1271,11 @@ export function TranscriptionUpload() {
                       <AlertDescription className="text-yellow-700 dark:text-yellow-300">
                         <div className="flex items-start justify-between">
                           <div>
-                            <strong className="font-semibold">No Captions Found</strong>
+                            <strong className="font-semibold">⚠️ No Captions Available</strong>
                             <p className="text-sm mt-1">{captionStatus.message}</p>
-                            <p className="text-xs mt-2 opacity-75">
-                              This video may not work with the current transcription method. Try a video with captions/subtitles enabled.
+                            <p className="text-xs mt-2 opacity-90">
+                              This video cannot be transcribed because it doesn't have captions or subtitles. 
+                              Please try a different video that has captions enabled, or use the YouTube search feature to find videos with captions.
                             </p>
                           </div>
                           <XCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 flex-shrink-0 ml-2" />
@@ -1390,8 +1410,7 @@ export function TranscriptionUpload() {
                   !youtubeUrl.trim() || 
                   isProcessing || 
                   captionStatus.checking ||
-                  (captionStatus.available === false && !forceTranscribe) ||
-                  (captionStatus.available === null && !forceTranscribe)
+                  (captionStatus.available === false && !forceTranscribe)
                 }
                 className="w-full"
               >
@@ -1408,17 +1427,17 @@ export function TranscriptionUpload() {
                 ) : captionStatus.available === false && !forceTranscribe ? (
                   <>
                     <AlertTriangle className="mr-2 h-4 w-4" />
-                    No Captions Available
+                    No Captions - Cannot Transcribe
                   </>
-                ) : captionStatus.available === null && !forceTranscribe ? (
+                ) : captionStatus.available === true ? (
                   <>
-                    <AlertCircle className="mr-2 h-4 w-4" />
-                    Waiting for Caption Check...
+                    <CheckCircle2 className="mr-2 h-4 w-4" />
+                    {forceTranscribe ? 'Force Transcribe Video' : 'Transcribe YouTube Video'}
                   </>
                 ) : (
                   <>
                     <Youtube className="mr-2 h-4 w-4" />
-                    {forceTranscribe ? 'Force Transcribe Video' : 'Transcribe YouTube Video'}
+                    Check Captions & Transcribe
                   </>
                 )}
               </Button>
