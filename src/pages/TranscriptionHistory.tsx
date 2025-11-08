@@ -1014,6 +1014,65 @@ export default function TranscriptionHistory() {
     setAssignTagsToLog(null);
   };
 
+  // Bulk tag operations
+  const handleBulkAddTag = async (tagId: string) => {
+    if (selectedIds.size === 0) {
+      toast.error("No transcriptions selected");
+      return;
+    }
+
+    try {
+      const insertData = Array.from(selectedIds).map(transcriptionId => ({
+        transcription_id: transcriptionId,
+        tag_id: tagId
+      }));
+
+      const { error } = await supabase
+        .from("transcription_tags")
+        .insert(insertData);
+
+      if (error) {
+        // Check if some were already assigned (unique constraint violation)
+        if (error.code === '23505') {
+          toast.warning("Tag added to available transcriptions (some already had this tag)");
+        } else {
+          throw error;
+        }
+      } else {
+        toast.success(`Tag added to ${selectedIds.size} transcription(s)`);
+      }
+      fetchLogs();
+    } catch (error) {
+      console.error("Error bulk adding tag:", error);
+      toast.error("Failed to add tag to transcriptions");
+    }
+  };
+
+  const handleBulkRemoveTag = async (tagId: string) => {
+    if (selectedIds.size === 0) {
+      toast.error("No transcriptions selected");
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from("transcription_tags")
+        .delete()
+        .in("transcription_id", Array.from(selectedIds))
+        .eq("tag_id", tagId);
+
+      if (error) {
+        throw error;
+      }
+
+      toast.success(`Tag removed from ${selectedIds.size} transcription(s)`);
+      fetchLogs();
+    } catch (error) {
+      console.error("Error bulk removing tag:", error);
+      toast.error("Failed to remove tag from transcriptions");
+    }
+  };
+
   const handlePageSizeChange = (value: string) => {
     setPageSize(Number(value));
     setCurrentPage(1);
@@ -2152,6 +2211,84 @@ export default function TranscriptionHistory() {
                 >
                   Clear Selection
                 </Button>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                    >
+                      <Tag className="h-4 w-4 mr-2" />
+                      Add Tag
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-64 bg-card border shadow-lg z-50" align="end">
+                    <div className="space-y-2">
+                      <h4 className="font-medium text-sm">Add Tag to Selected</h4>
+                      {tags.length === 0 ? (
+                        <div className="text-center py-4">
+                          <p className="text-sm text-muted-foreground mb-2">No tags available</p>
+                          <Button size="sm" variant="outline" onClick={openCreateTagDialog}>
+                            <Plus className="h-4 w-4 mr-2" />
+                            Create Tag
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="space-y-2 max-h-60 overflow-y-auto">
+                          {tags.map((tag) => (
+                            <button
+                              key={tag.id}
+                              className="w-full flex items-center gap-2 p-2 border rounded-lg hover:bg-muted/50 transition-colors text-left"
+                              onClick={() => handleBulkAddTag(tag.id)}
+                            >
+                              <div
+                                className="w-3 h-3 rounded"
+                                style={{ backgroundColor: tag.color }}
+                              />
+                              <span className="text-sm flex-1">{tag.name}</span>
+                              <Plus className="h-4 w-4 text-muted-foreground" />
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                    >
+                      <Tag className="h-4 w-4 mr-2" />
+                      Remove Tag
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-64 bg-card border shadow-lg z-50" align="end">
+                    <div className="space-y-2">
+                      <h4 className="font-medium text-sm">Remove Tag from Selected</h4>
+                      {tags.length === 0 ? (
+                        <p className="text-sm text-muted-foreground py-2">No tags available</p>
+                      ) : (
+                        <div className="space-y-2 max-h-60 overflow-y-auto">
+                          {tags.map((tag) => (
+                            <button
+                              key={tag.id}
+                              className="w-full flex items-center gap-2 p-2 border rounded-lg hover:bg-muted/50 transition-colors text-left"
+                              onClick={() => handleBulkRemoveTag(tag.id)}
+                            >
+                              <div
+                                className="w-3 h-3 rounded"
+                                style={{ backgroundColor: tag.color }}
+                              />
+                              <span className="text-sm flex-1">{tag.name}</span>
+                              <X className="h-4 w-4 text-muted-foreground" />
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
                 <Button
                   variant="outline"
                   size="sm"
