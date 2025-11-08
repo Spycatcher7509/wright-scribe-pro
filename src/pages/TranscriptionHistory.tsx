@@ -14,6 +14,7 @@ import { format, parseISO, startOfDay, startOfHour, getHours, getDay, startOfWee
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { diffWords } from 'diff';
 import TagUsageHeatmap from "@/components/TagUsageHeatmap";
+import TagUsageStatistics from "@/components/TagUsageStatistics";
 
 // Color palette themes for tags
 const COLOR_THEMES = {
@@ -1810,6 +1811,11 @@ export default function TranscriptionHistory() {
                       </ResponsiveContainer>
                     </CardContent>
                   </Card>
+
+                  {/* Tag Usage Statistics */}
+                  <div className="lg:col-span-3">
+                    <TagUsageStatistics logs={logs} tags={tags} />
+                  </div>
 
                   {/* Tag Usage Heatmap */}
                   <Card className="lg:col-span-3">
