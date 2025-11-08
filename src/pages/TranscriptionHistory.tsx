@@ -237,6 +237,8 @@ export default function TranscriptionHistory() {
   const [analyticsStartDate, setAnalyticsStartDate] = useState<Date | undefined>(undefined);
   const [analyticsEndDate, setAnalyticsEndDate] = useState<Date | undefined>(undefined);
   const [showQuickTagMenu, setShowQuickTagMenu] = useState(false);
+  const [showTagAutocomplete, setShowTagAutocomplete] = useState(false);
+  const [tagAutocompleteResults, setTagAutocompleteResults] = useState<Tag[]>([]);
 
   // Save filter preferences whenever they change
   useEffect(() => {
@@ -505,6 +507,52 @@ export default function TranscriptionHistory() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [tags, logs, selectedIds]);
+
+  // Tag autocomplete when typing in search
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      setShowTagAutocomplete(false);
+      setTagAutocompleteResults([]);
+      return;
+    }
+
+    // Check if search starts with # or contains tag-like pattern
+    const tagPattern = /#(\w+)/;
+    const match = searchQuery.match(tagPattern);
+    
+    if (match || searchQuery.startsWith('#')) {
+      const tagSearchTerm = match ? match[1] : searchQuery.slice(1);
+      
+      if (tagSearchTerm) {
+        const matchingTags = tags.filter(tag => 
+          tag.name.toLowerCase().includes(tagSearchTerm.toLowerCase())
+        ).slice(0, 8); // Limit to 8 suggestions
+        
+        setTagAutocompleteResults(matchingTags);
+        setShowTagAutocomplete(matchingTags.length > 0);
+      } else {
+        // Show all tags when just # is typed
+        setTagAutocompleteResults(tags.slice(0, 8));
+        setShowTagAutocomplete(tags.length > 0);
+      }
+    } else {
+      setShowTagAutocomplete(false);
+      setTagAutocompleteResults([]);
+    }
+  }, [searchQuery, tags]);
+
+  const handleTagAutocompleteSelect = (tag: Tag) => {
+    // Add tag to filter
+    const newFilters = new Set(selectedTagFilters);
+    newFilters.add(tag.id);
+    setSelectedTagFilters(newFilters);
+    
+    // Clear search and close autocomplete
+    setSearchQuery('');
+    setShowTagAutocomplete(false);
+    
+    toast.success(`Filtering by tag: ${tag.name}`);
+  };
 
   useEffect(() => {
     filterLogs();
@@ -2324,11 +2372,40 @@ export default function TranscriptionHistory() {
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     id="search"
-                    placeholder="Search transcriptions..."
+                    placeholder="Type # for tags..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
+                    onFocus={() => searchQuery.includes('#') && setShowTagAutocomplete(true)}
+                    onBlur={() => setTimeout(() => setShowTagAutocomplete(false), 200)}
                     className="pl-10"
                   />
+                  
+                  {/* Tag Autocomplete Dropdown */}
+                  {showTagAutocomplete && tagAutocompleteResults.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 mt-1 bg-popover border border-border rounded-md shadow-lg z-50 max-h-60 overflow-y-auto">
+                      <div className="p-2">
+                        <div className="text-xs font-medium text-muted-foreground mb-2 px-2">
+                          Select a tag to filter
+                        </div>
+                        {tagAutocompleteResults.map((tag) => (
+                          <button
+                            key={tag.id}
+                            onClick={() => handleTagAutocompleteSelect(tag)}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-accent rounded-md transition-colors text-left"
+                          >
+                            <div
+                              className="w-3 h-3 rounded flex-shrink-0"
+                              style={{ backgroundColor: tag.color }}
+                            />
+                            <span className="flex-1">{tag.name}</span>
+                            {selectedTagFilters.has(tag.id) && (
+                              <Badge variant="secondary" className="text-xs">Active</Badge>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
