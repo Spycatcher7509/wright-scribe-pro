@@ -14,6 +14,7 @@ import { Upload, FileAudio, Loader2, Youtube, AlertTriangle, Shield, Eye, Histor
 import { calculateFileChecksum } from "@/lib/checksumUtils";
 import { format } from "date-fns";
 import { useTranscriptionProgress } from "@/hooks/useTranscriptionProgress";
+import { useBatchTranscriptionProgress } from "@/hooks/useBatchTranscriptionProgress";
 
 interface TranscriptionResult {
   text: string;
@@ -59,14 +60,8 @@ export function TranscriptionUpload() {
   const [showSearch, setShowSearch] = useState(false);
   const [selectedVideos, setSelectedVideos] = useState<Set<string>>(new Set());
   const [isBulkProcessing, setIsBulkProcessing] = useState(false);
-  const [bulkProgress, setBulkProgress] = useState<{
-    [videoId: string]: {
-      status: 'pending' | 'processing' | 'completed' | 'failed';
-      progress: number;
-      error?: string;
-      result?: any;
-    }
-  }>({});
+  const [batchVideoIds, setBatchVideoIds] = useState<string[]>([]);
+  const batchProgress = useBatchTranscriptionProgress(batchVideoIds);
   
   // Extract video ID for progress tracking
   const extractVideoId = (url: string): string | null => {
@@ -402,6 +397,9 @@ export function TranscriptionUpload() {
 
     const selectedVideosList = searchResults.filter(v => selectedVideos.has(v.videoId));
     
+    setIsBulkProcessing(true);
+    setBatchVideoIds(selectedVideosList.map(v => v.videoId));
+
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
@@ -409,52 +407,48 @@ export function TranscriptionUpload() {
         return;
       }
 
-      // Add all selected videos to the queue
-      const queueItems = selectedVideosList.map(video => ({
-        user_id: user.id,
-        video_id: video.videoId,
-        video_url: video.url,
-        video_title: video.title,
-        video_thumbnail: video.thumbnail,
-        channel_title: video.channelTitle,
-        language: video.captions.hasRequestedLanguage && searchLanguage !== 'any' ? searchLanguage : 'en',
-        status: 'pending'
-      }));
+      toast.info(`Starting batch transcription of ${selectedVideos.size} video${selectedVideos.size > 1 ? 's' : ''}...`);
 
-      const { error } = await supabase
-        .from('transcription_queue')
-        .insert(queueItems);
+      // Process each video sequentially to avoid overwhelming the API
+      for (const video of selectedVideosList) {
+        try {
+          const { data, error } = await supabase.functions.invoke('transcribe-youtube', {
+            body: {
+              youtubeUrl: video.url,
+              language: video.captions.hasRequestedLanguage && searchLanguage !== 'any' ? searchLanguage : 'en'
+            }
+          });
 
-      if (error) throw error;
+          if (error) {
+            console.error(`Error transcribing ${video.title}:`, error);
+            toast.error(`Failed to transcribe: ${video.title}`);
+          } else if (data.error) {
+            console.error(`Error transcribing ${video.title}:`, data.error);
+            toast.error(`Failed to transcribe: ${video.title}`);
+          } else {
+            toast.success(`Completed: ${video.title}`);
+          }
 
-      toast.success(`Added ${selectedVideos.size} video${selectedVideos.size > 1 ? 's' : ''} to queue`);
-      
-      // Clear selection
+          // Small delay between requests to avoid rate limiting
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          
+        } catch (error: any) {
+          console.error(`Error processing ${video.title}:`, error);
+          toast.error(`Failed to process: ${video.title}`);
+        }
+      }
+
+      toast.success(`Batch transcription complete!`);
       setSelectedVideos(new Set());
-      setBulkProgress({});
-      
-      // Optionally navigate to queue manager or show it
-      toast.info('View the Queue Manager to process these videos');
       
     } catch (error: any) {
-      console.error('Error adding to queue:', error);
-      toast.error('Failed to add videos to queue');
+      console.error('Batch transcription error:', error);
+      toast.error('Failed to complete batch transcription');
+    } finally {
+      setIsBulkProcessing(false);
     }
   };
 
-  const handleViewBulkResult = (videoId: string) => {
-    const progress = bulkProgress[videoId];
-    if (progress?.result) {
-      setResult({
-        text: progress.result.text,
-        duration: progress.result.duration,
-        language: progress.result.language,
-        logId: progress.result.logId,
-        title: progress.result.title,
-      });
-      toast.success("Loaded transcription result");
-    }
-  };
 
   const handleSelectSearchResult = (videoUrl: string) => {
     setYoutubeUrl(videoUrl);
@@ -629,7 +623,8 @@ export function TranscriptionUpload() {
     setSearchQuery("");
     setSearchLanguage("any");
     setSelectedVideos(new Set());
-    setBulkProgress({});
+    setIsBulkProcessing(false);
+    setBatchVideoIds([]);
   };
 
   const handleUseCachedResult = (log: any) => {
@@ -980,11 +975,11 @@ export function TranscriptionUpload() {
                         <div className="max-h-96 overflow-y-auto space-y-2">
                           {searchResults.map((video) => {
                             const isSelected = selectedVideos.has(video.videoId);
-                            const progress = bulkProgress[video.videoId];
+                            const progress = batchProgress[video.videoId];
                             
                             return (
                               <Card 
-                                key={video.videoId} 
+                                key={video.videoId}
                                 className={`transition-colors ${
                                   isSelected ? 'border-primary bg-primary/5' : 'hover:bg-accent/50'
                                 } ${progress?.status === 'completed' ? 'border-green-500' : ''} ${
@@ -1041,29 +1036,15 @@ export function TranscriptionUpload() {
                                               </>
                                             )}
                                             {progress.status === 'completed' && (
-                                              <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-2 text-xs">
-                                                  <CheckCircle2 className="h-3 w-3 text-green-600" />
-                                                  <span className="text-green-600 font-medium">Completed</span>
-                                                </div>
-                                                <Button
-                                                  variant="ghost"
-                                                  size="sm"
-                                                  onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleViewBulkResult(video.videoId);
-                                                  }}
-                                                  className="h-6 text-xs"
-                                                >
-                                                  <Eye className="mr-1 h-3 w-3" />
-                                                  View
-                                                </Button>
+                                              <div className="flex items-center gap-2 text-xs">
+                                                <CheckCircle2 className="h-3 w-3 text-green-600" />
+                                                <span className="text-green-600 font-medium">Completed</span>
                                               </div>
                                             )}
-                                            {progress.status === 'failed' && (
+                                             {progress.status === 'failed' && (
                                               <div className="flex items-center gap-2 text-xs">
                                                 <XCircle className="h-3 w-3 text-red-600" />
-                                                <span className="text-red-600 font-medium">{progress.error || 'Failed'}</span>
+                                                <span className="text-red-600 font-medium">{progress.message || 'Failed'}</span>
                                               </div>
                                             )}
                                             {progress.status === 'pending' && (
@@ -1318,6 +1299,64 @@ export function TranscriptionUpload() {
           </Tabs>
         </CardContent>
       </Card>
+
+      {/* Batch Progress Panel */}
+      {isBulkProcessing && batchVideoIds.length > 0 && (
+        <Card className="border-primary">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              Batch Transcription In Progress
+            </CardTitle>
+            <CardDescription>
+              Processing {batchVideoIds.length} video{batchVideoIds.length > 1 ? 's' : ''}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {batchVideoIds.map((videoId) => {
+              const video = searchResults.find(v => v.videoId === videoId);
+              const progress = batchProgress[videoId];
+              
+              if (!video) return null;
+
+              return (
+                <div key={videoId} className="p-3 border rounded-lg space-y-2">
+                  <div className="flex items-start gap-3">
+                    <img 
+                      src={video.thumbnail} 
+                      alt={video.title}
+                      className="w-24 h-16 object-cover rounded flex-shrink-0"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-medium text-sm line-clamp-1">{video.title}</h4>
+                      <p className="text-xs text-muted-foreground">{video.channelTitle}</p>
+                      
+                      {progress && (
+                        <div className="mt-2 space-y-1">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-medium">
+                              {progress.status === 'starting' && 'Initializing...'}
+                              {progress.status === 'downloading' && 'Downloading audio...'}
+                              {progress.status === 'transcribing' && 'Transcribing...'}
+                              {progress.status === 'completed' && '✓ Completed'}
+                              {progress.status === 'failed' && '✗ Failed'}
+                            </span>
+                            <span className="text-muted-foreground">{progress.progress}%</span>
+                          </div>
+                          <Progress value={progress.progress} className="h-1" />
+                          {progress.message && (
+                            <p className="text-xs text-muted-foreground">{progress.message}</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
 
       {result && (
         <Card>
