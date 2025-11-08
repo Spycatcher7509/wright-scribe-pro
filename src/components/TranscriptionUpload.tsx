@@ -56,6 +56,16 @@ export function TranscriptionUpload() {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const [selectedVideos, setSelectedVideos] = useState<Set<string>>(new Set());
+  const [isBulkProcessing, setIsBulkProcessing] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{
+    [videoId: string]: {
+      status: 'pending' | 'processing' | 'completed' | 'failed';
+      progress: number;
+      error?: string;
+      result?: any;
+    }
+  }>({});
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -338,6 +348,132 @@ export function TranscriptionUpload() {
     }
   };
 
+  const toggleVideoSelection = (videoId: string) => {
+    setSelectedVideos(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(videoId)) {
+        newSet.delete(videoId);
+      } else {
+        newSet.add(videoId);
+      }
+      return newSet;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedVideos.size === searchResults.length) {
+      setSelectedVideos(new Set());
+    } else {
+      setSelectedVideos(new Set(searchResults.map(v => v.videoId)));
+    }
+  };
+
+  const handleBulkTranscribe = async () => {
+    if (selectedVideos.size === 0) {
+      toast.error("Please select at least one video");
+      return;
+    }
+
+    const selectedVideosList = searchResults.filter(v => selectedVideos.has(v.videoId));
+    
+    setIsBulkProcessing(true);
+    const initialProgress: typeof bulkProgress = {};
+    selectedVideosList.forEach(video => {
+      initialProgress[video.videoId] = { status: 'pending', progress: 0 };
+    });
+    setBulkProgress(initialProgress);
+
+    toast.info(`Starting transcription of ${selectedVideos.size} video${selectedVideos.size > 1 ? 's' : ''}...`);
+
+    // Process videos sequentially to avoid rate limits
+    for (const video of selectedVideosList) {
+      try {
+        setBulkProgress(prev => ({
+          ...prev,
+          [video.videoId]: { ...prev[video.videoId], status: 'processing', progress: 10 }
+        }));
+
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          throw new Error("Session expired");
+        }
+
+        // Simulate progress updates
+        const progressInterval = setInterval(() => {
+          setBulkProgress(prev => ({
+            ...prev,
+            [video.videoId]: { 
+              ...prev[video.videoId], 
+              progress: Math.min((prev[video.videoId]?.progress || 0) + 15, 90) 
+            }
+          }));
+        }, 500);
+
+        const { data, error } = await supabase.functions.invoke("transcribe-youtube", {
+          body: { 
+            youtubeUrl: video.url,
+            language: video.captions.hasRequestedLanguage ? searchLanguage : 'en',
+            downloadVideo: false
+          },
+        });
+
+        clearInterval(progressInterval);
+
+        if (error) throw error;
+        if (data.error) throw new Error(data.error);
+
+        setBulkProgress(prev => ({
+          ...prev,
+          [video.videoId]: { 
+            status: 'completed', 
+            progress: 100,
+            result: data
+          }
+        }));
+
+        toast.success(`Completed: ${video.title.substring(0, 50)}...`);
+
+        // Small delay between videos to avoid overwhelming the API
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+      } catch (error: any) {
+        console.error(`Error transcribing ${video.videoId}:`, error);
+        
+        setBulkProgress(prev => ({
+          ...prev,
+          [video.videoId]: { 
+            status: 'failed', 
+            progress: 0,
+            error: error.message || 'Transcription failed'
+          }
+        }));
+
+        toast.error(`Failed: ${video.title.substring(0, 50)}...`);
+      }
+    }
+
+    setIsBulkProcessing(false);
+    
+    const completed = Object.values(bulkProgress).filter(p => p.status === 'completed').length;
+    const failed = Object.values(bulkProgress).filter(p => p.status === 'failed').length;
+    
+    toast.success(`Bulk transcription complete: ${completed} succeeded, ${failed} failed`);
+  };
+
+  const handleViewBulkResult = (videoId: string) => {
+    const progress = bulkProgress[videoId];
+    if (progress?.result) {
+      setResult({
+        text: progress.result.text,
+        duration: progress.result.duration,
+        language: progress.result.language,
+        logId: progress.result.logId,
+        title: progress.result.title,
+      });
+      toast.success("Loaded transcription result");
+    }
+  };
+
   const handleSelectSearchResult = (videoUrl: string) => {
     setYoutubeUrl(videoUrl);
     setShowSearch(false);
@@ -510,6 +646,8 @@ export function TranscriptionUpload() {
     setSearchResults([]);
     setSearchQuery("");
     setSearchLanguage("");
+    setSelectedVideos(new Set());
+    setBulkProgress({});
   };
 
   const handleUseCachedResult = (log: any) => {
@@ -824,40 +962,144 @@ export function TranscriptionUpload() {
                     {/* Search Results */}
                     {searchResults.length > 0 && (
                       <div className="space-y-3 mt-4">
-                        <Label className="text-sm font-semibold">Search Results ({searchResults.length})</Label>
+                        <div className="flex items-center justify-between">
+                          <Label className="text-sm font-semibold">Search Results ({searchResults.length})</Label>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={toggleSelectAll}
+                              disabled={isBulkProcessing}
+                            >
+                              {selectedVideos.size === searchResults.length ? 'Deselect All' : 'Select All'}
+                            </Button>
+                            {selectedVideos.size > 0 && (
+                              <Button
+                                size="sm"
+                                onClick={handleBulkTranscribe}
+                                disabled={isBulkProcessing}
+                              >
+                                {isBulkProcessing ? (
+                                  <>
+                                    <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                                    Processing {selectedVideos.size}...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Youtube className="mr-2 h-3 w-3" />
+                                    Transcribe {selectedVideos.size} Selected
+                                  </>
+                                )}
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                        
                         <div className="max-h-96 overflow-y-auto space-y-2">
-                          {searchResults.map((video) => (
-                            <Card key={video.videoId} className="hover:bg-accent/50 cursor-pointer transition-colors">
-                              <CardContent className="p-3" onClick={() => handleSelectSearchResult(video.url)}>
-                                <div className="flex gap-3">
-                                  <img 
-                                    src={video.thumbnail} 
-                                    alt={video.title}
-                                    className="w-32 h-20 object-cover rounded flex-shrink-0"
-                                  />
-                                  <div className="flex-1 min-w-0">
-                                    <h4 className="font-medium text-sm line-clamp-2 mb-1">{video.title}</h4>
-                                    <p className="text-xs text-muted-foreground mb-2">{video.channelTitle}</p>
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                      <div className="flex items-center gap-1 text-xs">
-                                        <Subtitles className="h-3 w-3 text-green-600" />
-                                        <span className="text-green-600 font-medium">
-                                          {video.captions.languages.length} caption{video.captions.languages.length !== 1 ? 's' : ''}
-                                        </span>
-                                      </div>
-                                      {video.captions.hasRequestedLanguage && (
-                                        <div className="flex items-center gap-1 text-xs">
-                                          <CheckCircle2 className="h-3 w-3 text-blue-600" />
-                                          <span className="text-blue-600 font-medium">Target language</span>
+                          {searchResults.map((video) => {
+                            const isSelected = selectedVideos.has(video.videoId);
+                            const progress = bulkProgress[video.videoId];
+                            
+                            return (
+                              <Card 
+                                key={video.videoId} 
+                                className={`transition-colors ${
+                                  isSelected ? 'border-primary bg-primary/5' : 'hover:bg-accent/50'
+                                } ${progress?.status === 'completed' ? 'border-green-500' : ''} ${
+                                  progress?.status === 'failed' ? 'border-red-500' : ''
+                                }`}
+                              >
+                                <CardContent className="p-3">
+                                  <div className="flex gap-3">
+                                    <div className="flex items-start pt-1">
+                                      <Checkbox
+                                        checked={isSelected}
+                                        onCheckedChange={() => toggleVideoSelection(video.videoId)}
+                                        disabled={isBulkProcessing}
+                                        onClick={(e) => e.stopPropagation()}
+                                      />
+                                    </div>
+                                    <div 
+                                      className="flex gap-3 flex-1 cursor-pointer"
+                                      onClick={() => !isBulkProcessing && handleSelectSearchResult(video.url)}
+                                    >
+                                      <img 
+                                        src={video.thumbnail} 
+                                        alt={video.title}
+                                        className="w-32 h-20 object-cover rounded flex-shrink-0"
+                                      />
+                                      <div className="flex-1 min-w-0">
+                                        <h4 className="font-medium text-sm line-clamp-2 mb-1">{video.title}</h4>
+                                        <p className="text-xs text-muted-foreground mb-2">{video.channelTitle}</p>
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <div className="flex items-center gap-1 text-xs">
+                                            <Subtitles className="h-3 w-3 text-green-600" />
+                                            <span className="text-green-600 font-medium">
+                                              {video.captions.languages.length} caption{video.captions.languages.length !== 1 ? 's' : ''}
+                                            </span>
+                                          </div>
+                                          {video.captions.hasRequestedLanguage && (
+                                            <div className="flex items-center gap-1 text-xs">
+                                              <CheckCircle2 className="h-3 w-3 text-blue-600" />
+                                              <span className="text-blue-600 font-medium">Target language</span>
+                                            </div>
+                                          )}
                                         </div>
-                                      )}
+                                        
+                                        {/* Bulk Progress Indicator */}
+                                        {progress && (
+                                          <div className="mt-2 space-y-1">
+                                            {progress.status === 'processing' && (
+                                              <>
+                                                <div className="flex items-center gap-2 text-xs">
+                                                  <Loader2 className="h-3 w-3 animate-spin text-blue-600" />
+                                                  <span className="text-blue-600 font-medium">Transcribing...</span>
+                                                </div>
+                                                <Progress value={progress.progress} className="h-1" />
+                                              </>
+                                            )}
+                                            {progress.status === 'completed' && (
+                                              <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2 text-xs">
+                                                  <CheckCircle2 className="h-3 w-3 text-green-600" />
+                                                  <span className="text-green-600 font-medium">Completed</span>
+                                                </div>
+                                                <Button
+                                                  variant="ghost"
+                                                  size="sm"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleViewBulkResult(video.videoId);
+                                                  }}
+                                                  className="h-6 text-xs"
+                                                >
+                                                  <Eye className="mr-1 h-3 w-3" />
+                                                  View
+                                                </Button>
+                                              </div>
+                                            )}
+                                            {progress.status === 'failed' && (
+                                              <div className="flex items-center gap-2 text-xs">
+                                                <XCircle className="h-3 w-3 text-red-600" />
+                                                <span className="text-red-600 font-medium">{progress.error || 'Failed'}</span>
+                                              </div>
+                                            )}
+                                            {progress.status === 'pending' && (
+                                              <div className="flex items-center gap-2 text-xs">
+                                                <div className="h-3 w-3 rounded-full border-2 border-muted-foreground" />
+                                                <span className="text-muted-foreground font-medium">Pending...</span>
+                                              </div>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                      <ExternalLink className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                                     </div>
                                   </div>
-                                  <ExternalLink className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                                </div>
-                              </CardContent>
-                            </Card>
-                          ))}
+                                </CardContent>
+                              </Card>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
