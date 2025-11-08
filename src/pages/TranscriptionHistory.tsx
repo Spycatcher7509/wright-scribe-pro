@@ -97,6 +97,7 @@ interface TranscriptionLog {
   error_message?: string;
   log_time: string;
   transcription_text?: string;
+  file_checksum?: string;
   tags?: Tag[];
 }
 
@@ -241,6 +242,7 @@ export default function TranscriptionHistory() {
   
   const [searchQuery, setSearchQuery] = useState(savedPrefs.searchQuery || "");
   const [contentSearchQuery, setContentSearchQuery] = useState(savedPrefs.contentSearchQuery || "");
+  const [checksumQuery, setChecksumQuery] = useState("");
   const [startDate, setStartDate] = useState(savedPrefs.startDate || "");
   const [endDate, setEndDate] = useState(savedPrefs.endDate || "");
   const [selectedLog, setSelectedLog] = useState<TranscriptionLog | null>(null);
@@ -1100,7 +1102,7 @@ export default function TranscriptionHistory() {
   useEffect(() => {
     filterLogs();
     setCurrentPage(1); // Reset to first page when filters or sort changes
-  }, [searchQuery, contentSearchQuery, startDate, endDate, logs, sortField, sortDirection, selectedStatuses, lengthRange, selectedTagFilters]);
+  }, [searchQuery, contentSearchQuery, checksumQuery, startDate, endDate, logs, sortField, sortDirection, selectedStatuses, lengthRange, selectedTagFilters]);
 
 
   const checkAuth = async () => {
@@ -1163,26 +1165,31 @@ export default function TranscriptionHistory() {
       );
     }
 
-    // Status filter
-    if (selectedStatuses.size > 0 && selectedStatuses.size < 3) {
+    // Checksum filter (find all versions of the same file)
+    if (checksumQuery.trim()) {
       filtered = filtered.filter((log) =>
-        selectedStatuses.has(log.status.toLowerCase())
+        log.file_checksum?.toLowerCase().includes(checksumQuery.toLowerCase())
       );
     }
 
-    // Date range filter
+    // Date filter
     if (startDate) {
-      filtered = filtered.filter((log) => {
-        const logDate = new Date(log.created_at);
-        return logDate >= new Date(startDate);
-      });
+      filtered = filtered.filter((log) =>
+        new Date(log.created_at) >= new Date(startDate)
+      );
     }
 
     if (endDate) {
-      filtered = filtered.filter((log) => {
-        const logDate = new Date(log.created_at);
-        return logDate <= new Date(endDate);
-      });
+      filtered = filtered.filter((log) =>
+        new Date(log.created_at) <= new Date(endDate)
+      );
+    }
+
+    // Status filter
+    if (selectedStatuses.size > 0) {
+      filtered = filtered.filter((log) =>
+        selectedStatuses.has(log.status)
+      );
     }
 
     // Length range filter
@@ -1197,7 +1204,6 @@ export default function TranscriptionHistory() {
     if (selectedTagFilters.size > 0) {
       filtered = filtered.filter((log) => {
         if (!log.tags || log.tags.length === 0) return false;
-        // Check if the log has at least one of the selected tags
         return log.tags.some(tag => selectedTagFilters.has(tag.id));
       });
     }
@@ -1416,6 +1422,7 @@ export default function TranscriptionHistory() {
   const handleClearFilters = () => {
     setSearchQuery("");
     setContentSearchQuery("");
+    setChecksumQuery("");
     setStartDate("");
     setEndDate("");
     setCurrentPage(1);
@@ -3134,6 +3141,20 @@ export default function TranscriptionHistory() {
               </div>
 
               <div className="space-y-2">
+                <Label htmlFor="checksumSearch">Search by checksum</Label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="checksumSearch"
+                    placeholder="Find file versions..."
+                    value={checksumQuery}
+                    onChange={(e) => setChecksumQuery(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
                 <Label>Filter by Status</Label>
                 <Popover>
                   <PopoverTrigger asChild>
@@ -4144,6 +4165,26 @@ export default function TranscriptionHistory() {
                 <Label className="text-sm font-semibold">File Title</Label>
                 <p className="text-sm mt-1">{selectedLog.file_title}</p>
               </div>
+              {selectedLog.file_checksum && (
+                <div>
+                  <Label className="text-sm font-semibold">File Checksum</Label>
+                  <p className="text-sm mt-1 font-mono text-muted-foreground break-all">
+                    {selectedLog.file_checksum}
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-2"
+                    onClick={() => {
+                      setChecksumQuery(selectedLog.file_checksum || '');
+                      setSelectedLog(null);
+                      toast.success('Filtering by checksum - showing all versions of this file');
+                    }}
+                  >
+                    Find all versions
+                  </Button>
+                </div>
+              )}
               <div>
                 <Label className="text-sm font-semibold">Status</Label>
                 <div className="mt-1">{getStatusBadge(selectedLog.status)}</div>
