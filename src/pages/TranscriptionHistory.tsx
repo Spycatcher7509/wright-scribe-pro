@@ -8,10 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet, Columns3, HelpCircle, Keyboard, BarChart3, Clock, Calendar } from "lucide-react";
+import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet, Columns3, HelpCircle, Keyboard, BarChart3, Clock, Calendar, GitCompare, Merge } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO, startOfDay, startOfHour, getHours, getDay } from "date-fns";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { diffWords } from 'diff';
 import {
   Dialog,
   DialogContent,
@@ -142,6 +143,9 @@ export default function TranscriptionHistory() {
   );
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareIds, setCompareIds] = useState<Set<string>>(new Set());
+  const [showCompareDialog, setShowCompareDialog] = useState(false);
 
   // Save filter preferences whenever they change
   useEffect(() => {
@@ -346,6 +350,97 @@ export default function TranscriptionHistory() {
     }
   };
 
+  // Handle compare mode
+  const handleEnterCompareMode = () => {
+    setCompareMode(true);
+    setCompareIds(new Set());
+    toast.info('Select 2-4 transcriptions to compare');
+  };
+
+  const handleExitCompareMode = () => {
+    setCompareMode(false);
+    setCompareIds(new Set());
+  };
+
+  const handleCompareToggle = (id: string) => {
+    const newCompareIds = new Set(compareIds);
+    if (newCompareIds.has(id)) {
+      newCompareIds.delete(id);
+    } else {
+      if (newCompareIds.size >= 4) {
+        toast.error('You can only compare up to 4 transcriptions');
+        return;
+      }
+      newCompareIds.add(id);
+    }
+    setCompareIds(newCompareIds);
+  };
+
+  const handleStartComparison = () => {
+    if (compareIds.size < 2) {
+      toast.error('Please select at least 2 transcriptions to compare');
+      return;
+    }
+    setShowCompareDialog(true);
+  };
+
+  // Get transcriptions for comparison
+  const compareTranscriptions = useMemo(() => {
+    return Array.from(compareIds).map(id => logs.find(log => log.id === id)).filter(Boolean) as TranscriptionLog[];
+  }, [compareIds, logs]);
+
+  // Calculate similarity between two texts
+  const calculateSimilarity = (text1: string, text2: string): number => {
+    const words1 = text1.toLowerCase().split(/\s+/);
+    const words2 = text2.toLowerCase().split(/\s+/);
+    const set1 = new Set(words1);
+    const set2 = new Set(words2);
+    const intersection = new Set([...set1].filter(x => set2.has(x)));
+    const union = new Set([...set1, ...set2]);
+    return union.size > 0 ? (intersection.size / union.size) * 100 : 0;
+  };
+
+  // Export comparison
+  const handleExportComparison = () => {
+    try {
+      let content = '# Transcription Comparison Report\n\n';
+      content += `Generated: ${format(new Date(), 'dd/MM/yyyy HH:mm:ss')}\n\n`;
+      
+      compareTranscriptions.forEach((trans, idx) => {
+        content += `## Transcription ${idx + 1}: ${trans.file_title}\n`;
+        content += `Status: ${trans.status}\n`;
+        content += `Created: ${format(new Date(trans.created_at), 'dd/MM/yyyy HH:mm:ss')}\n\n`;
+        content += `${trans.transcription_text || 'No transcription available'}\n\n`;
+        content += '---\n\n';
+      });
+
+      if (compareTranscriptions.length >= 2) {
+        content += '## Similarity Analysis\n\n';
+        for (let i = 0; i < compareTranscriptions.length; i++) {
+          for (let j = i + 1; j < compareTranscriptions.length; j++) {
+            const sim = calculateSimilarity(
+              compareTranscriptions[i].transcription_text || '',
+              compareTranscriptions[j].transcription_text || ''
+            );
+            content += `${compareTranscriptions[i].file_title} vs ${compareTranscriptions[j].file_title}: ${sim.toFixed(1)}% similar\n`;
+          }
+        }
+      }
+
+      const blob = new Blob([content], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `comparison_${new Date().toISOString().split('T')[0]}.md`;
+      link.click();
+      URL.revokeObjectURL(url);
+
+      toast.success('Comparison exported successfully');
+    } catch (error) {
+      console.error('Error exporting comparison:', error);
+      toast.error('Failed to export comparison');
+    }
+  };
 
   const handleDownloadTranscription = (log: TranscriptionLog) => {
     if (!log.transcription_text) {
@@ -1088,6 +1183,38 @@ export default function TranscriptionHistory() {
                   <BarChart3 className="h-4 w-4 mr-2" />
                   {showAnalytics ? 'Hide' : 'Show'} Analytics
                 </Button>
+                {!compareMode ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleEnterCompareMode}
+                  >
+                    <GitCompare className="h-4 w-4 mr-2" />
+                    Compare
+                  </Button>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary">
+                      {compareIds.size} selected
+                    </Badge>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={handleStartComparison}
+                      disabled={compareIds.size < 2}
+                    >
+                      <GitCompare className="h-4 w-4 mr-2" />
+                      Compare ({compareIds.size})
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleExitCompareMode}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 {lastUpdated && (
@@ -1341,14 +1468,18 @@ export default function TranscriptionHistory() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[50px]">
-                      <Checkbox 
-                        checked={
-                          paginatedLogs.filter(log => log.transcription_text).length > 0 &&
-                          paginatedLogs.filter(log => log.transcription_text).every(log => selectedIds.has(log.id))
-                        }
-                        onCheckedChange={handleSelectAll}
-                     />
+                     <TableHead className="w-[50px]">
+                      {compareMode ? (
+                        <span className="text-xs text-muted-foreground">Compare</span>
+                      ) : (
+                        <Checkbox 
+                          checked={
+                            paginatedLogs.filter(log => log.transcription_text).length > 0 &&
+                            paginatedLogs.filter(log => log.transcription_text).every(log => selectedIds.has(log.id))
+                          }
+                          onCheckedChange={handleSelectAll}
+                        />
+                      )}
                     </TableHead>
                     {visibleColumns.fileTitle && (
                       <TableHead>
@@ -1417,11 +1548,19 @@ export default function TranscriptionHistory() {
                         className={newlyUpdatedIds.has(log.id) ? 'animate-pulse bg-primary/5' : ''}
                       >
                         <TableCell>
-                          <Checkbox 
-                            checked={selectedIds.has(log.id)}
-                            onCheckedChange={(checked) => handleSelectOne(log.id, checked as boolean)}
-                            disabled={!log.transcription_text}
-                          />
+                          {compareMode ? (
+                            <Checkbox 
+                              checked={compareIds.has(log.id)}
+                              onCheckedChange={() => handleCompareToggle(log.id)}
+                              disabled={!log.transcription_text || (compareIds.size >= 4 && !compareIds.has(log.id))}
+                            />
+                          ) : (
+                            <Checkbox 
+                              checked={selectedIds.has(log.id)}
+                              onCheckedChange={(checked) => handleSelectOne(log.id, checked as boolean)}
+                              disabled={!log.transcription_text}
+                            />
+                          )}
                         </TableCell>
                         {visibleColumns.fileTitle && (
                           <TableCell className="font-medium">{log.file_title}</TableCell>
@@ -1782,6 +1921,143 @@ export default function TranscriptionHistory() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Comparison Dialog */}
+      <Dialog open={showCompareDialog} onOpenChange={(open) => {
+        setShowCompareDialog(open);
+        if (!open) {
+          setCompareMode(false);
+          setCompareIds(new Set());
+        }
+      }}>
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <GitCompare className="h-5 w-5" />
+              Compare Transcriptions ({compareTranscriptions.length})
+            </DialogTitle>
+            <DialogDescription>
+              Side-by-side comparison with similarity analysis
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-6">
+            {/* Similarity Matrix */}
+            {compareTranscriptions.length >= 2 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm">Similarity Analysis</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-2">
+                    {compareTranscriptions.map((trans1, i) => (
+                      compareTranscriptions.slice(i + 1).map((trans2, j) => {
+                        const similarity = calculateSimilarity(
+                          trans1.transcription_text || '',
+                          trans2.transcription_text || ''
+                        );
+                        return (
+                          <div key={`${i}-${j}`} className="flex items-center justify-between p-2 bg-muted rounded">
+                            <span className="text-sm">
+                              <span className="font-medium">{trans1.file_title}</span>
+                              {' vs '}
+                              <span className="font-medium">{trans2.file_title}</span>
+                            </span>
+                            <Badge variant={similarity > 70 ? 'default' : similarity > 40 ? 'secondary' : 'outline'}>
+                              {similarity.toFixed(1)}% similar
+                            </Badge>
+                          </div>
+                        );
+                      })
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Side-by-side comparison */}
+            <div className={`grid gap-4 ${compareTranscriptions.length === 2 ? 'md:grid-cols-2' : compareTranscriptions.length === 3 ? 'md:grid-cols-3' : 'md:grid-cols-2 lg:grid-cols-4'}`}>
+              {compareTranscriptions.map((trans, idx) => (
+                <Card key={trans.id}>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm">{trans.file_title}</CardTitle>
+                    <CardDescription className="text-xs">
+                      {getStatusBadge(trans.status)}
+                      <span className="ml-2">{format(new Date(trans.created_at), 'dd/MM/yyyy')}</span>
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="p-3 bg-muted rounded-md max-h-96 overflow-y-auto">
+                      <p className="text-xs whitespace-pre-wrap leading-relaxed">
+                        {trans.transcription_text || 'No transcription available'}
+                      </p>
+                    </div>
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      {trans.transcription_text ? `${trans.transcription_text.length.toLocaleString()} characters` : 'N/A'}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            {/* Word-level diff for 2 transcriptions */}
+            {compareTranscriptions.length === 2 && compareTranscriptions.every(t => t.transcription_text) && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <Merge className="h-4 w-4" />
+                    Word-Level Differences
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    <span className="inline-flex items-center gap-1">
+                      <span className="inline-block w-3 h-3 bg-green-200 dark:bg-green-900 rounded"></span>
+                      Added
+                    </span>
+                    <span className="inline-flex items-center gap-1 ml-3">
+                      <span className="inline-block w-3 h-3 bg-red-200 dark:bg-red-900 rounded"></span>
+                      Removed
+                    </span>
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="p-4 bg-muted rounded-md max-h-96 overflow-y-auto">
+                    <div className="text-sm leading-relaxed">
+                      {diffWords(compareTranscriptions[0].transcription_text!, compareTranscriptions[1].transcription_text!).map((part, idx) => (
+                        <span
+                          key={idx}
+                          className={
+                            part.added
+                              ? 'bg-green-200 dark:bg-green-900 px-0.5 rounded'
+                              : part.removed
+                              ? 'bg-red-200 dark:bg-red-900 px-0.5 rounded line-through'
+                              : ''
+                          }
+                        >
+                          {part.value}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          <div className="flex justify-between mt-4">
+            <Button variant="outline" onClick={handleExportComparison}>
+              <Download className="h-4 w-4 mr-2" />
+              Export Comparison
+            </Button>
+            <Button onClick={() => {
+              setShowCompareDialog(false);
+              setCompareMode(false);
+              setCompareIds(new Set());
+            }}>
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
