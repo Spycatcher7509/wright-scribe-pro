@@ -8,9 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet, Columns3, HelpCircle, Keyboard, BarChart3, Clock, Calendar, GitCompare, Merge } from "lucide-react";
+import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet, Columns3, HelpCircle, Keyboard, BarChart3, Clock, Calendar, GitCompare, Merge, Sliders } from "lucide-react";
 import { toast } from "sonner";
-import { format, parseISO, startOfDay, startOfHour, getHours, getDay } from "date-fns";
+import { format, parseISO, startOfDay, startOfHour, getHours, getDay, startOfWeek, startOfMonth, subDays, endOfDay } from "date-fns";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { diffWords } from 'diff';
 import {
@@ -51,6 +51,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { Slider } from "@/components/ui/slider";
 
 interface TranscriptionLog {
   id: string;
@@ -77,6 +78,8 @@ interface FilterPreferences {
   sortField: SortField | null;
   sortDirection: SortDirection;
   visibleColumns: ColumnVisibility;
+  lengthRange: [number, number];
+  showAdvancedFilters: boolean;
 }
 
 interface ColumnVisibility {
@@ -146,6 +149,8 @@ export default function TranscriptionHistory() {
   const [compareMode, setCompareMode] = useState(false);
   const [compareIds, setCompareIds] = useState<Set<string>>(new Set());
   const [showCompareDialog, setShowCompareDialog] = useState(false);
+  const [lengthRange, setLengthRange] = useState<[number, number]>(savedPrefs.lengthRange || [0, 50000]);
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(savedPrefs.showAdvancedFilters || false);
 
   // Save filter preferences whenever they change
   useEffect(() => {
@@ -159,9 +164,11 @@ export default function TranscriptionHistory() {
       sortField,
       sortDirection,
       visibleColumns,
+      lengthRange,
+      showAdvancedFilters,
     };
     saveFilterPreferences(preferences);
-  }, [searchQuery, contentSearchQuery, startDate, endDate, selectedStatuses, pageSize, sortField, sortDirection, visibleColumns]);
+  }, [searchQuery, contentSearchQuery, startDate, endDate, selectedStatuses, pageSize, sortField, sortDirection, visibleColumns, lengthRange, showAdvancedFilters]);
 
 
   useEffect(() => {
@@ -234,7 +241,7 @@ export default function TranscriptionHistory() {
   useEffect(() => {
     filterLogs();
     setCurrentPage(1); // Reset to first page when filters or sort changes
-  }, [searchQuery, contentSearchQuery, startDate, endDate, logs, sortField, sortDirection, selectedStatuses]);
+  }, [searchQuery, contentSearchQuery, startDate, endDate, logs, sortField, sortDirection, selectedStatuses, lengthRange]);
 
 
   const checkAuth = async () => {
@@ -305,6 +312,14 @@ export default function TranscriptionHistory() {
       filtered = filtered.filter((log) => {
         const logDate = new Date(log.created_at);
         return logDate <= new Date(endDate);
+      });
+    }
+
+    // Length range filter
+    if (lengthRange[0] > 0 || lengthRange[1] < 50000) {
+      filtered = filtered.filter((log) => {
+        const length = log.transcription_text?.length || 0;
+        return length >= lengthRange[0] && length <= lengthRange[1];
       });
     }
 
@@ -528,6 +543,43 @@ export default function TranscriptionHistory() {
     setSortField(null);
     setSortDirection(null);
     setSelectedStatuses(new Set(['completed', 'processing', 'failed']));
+    setLengthRange([0, 50000]);
+  };
+
+  // Quick date presets
+  const applyDatePreset = (preset: string) => {
+    const today = new Date();
+    const todayStart = format(startOfDay(today), 'yyyy-MM-dd');
+    const todayEnd = format(endOfDay(today), 'yyyy-MM-dd');
+
+    switch (preset) {
+      case 'today':
+        setStartDate(todayStart);
+        setEndDate(todayEnd);
+        toast.success('Filter: Today');
+        break;
+      case 'yesterday':
+        const yesterday = subDays(today, 1);
+        setStartDate(format(startOfDay(yesterday), 'yyyy-MM-dd'));
+        setEndDate(format(endOfDay(yesterday), 'yyyy-MM-dd'));
+        toast.success('Filter: Yesterday');
+        break;
+      case 'week':
+        setStartDate(format(startOfWeek(today), 'yyyy-MM-dd'));
+        setEndDate(todayEnd);
+        toast.success('Filter: This Week');
+        break;
+      case 'month':
+        setStartDate(format(startOfMonth(today), 'yyyy-MM-dd'));
+        setEndDate(todayEnd);
+        toast.success('Filter: This Month');
+        break;
+      case 'last30':
+        setStartDate(format(subDays(today, 30), 'yyyy-MM-dd'));
+        setEndDate(todayEnd);
+        toast.success('Filter: Last 30 Days');
+        break;
+    }
   };
 
   const toggleStatus = (status: string) => {
@@ -1352,6 +1404,98 @@ export default function TranscriptionHistory() {
                 />
               </div>
             </div>
+
+            {/* Quick Date Presets */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium text-muted-foreground">Quick filters:</span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => applyDatePreset('today')}
+              >
+                Today
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => applyDatePreset('yesterday')}
+              >
+                Yesterday
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => applyDatePreset('week')}
+              >
+                This Week
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => applyDatePreset('month')}
+              >
+                This Month
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => applyDatePreset('last30')}
+              >
+                Last 30 Days
+              </Button>
+            </div>
+
+            {/* Advanced Filters Toggle */}
+            <div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                className="w-full justify-between"
+              >
+                <span className="flex items-center gap-2">
+                  <Sliders className="h-4 w-4" />
+                  Advanced Filters
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {showAdvancedFilters ? 'Hide' : 'Show'}
+                </span>
+              </Button>
+            </div>
+
+            {/* Advanced Filters */}
+            {showAdvancedFilters && (
+              <div className="space-y-6 p-4 border rounded-lg bg-muted/20">
+                <div className="space-y-3">
+                  <Label className="text-sm font-medium">
+                    Transcription Length Range: {lengthRange[0].toLocaleString()} - {lengthRange[1].toLocaleString()} characters
+                  </Label>
+                  <Slider
+                    min={0}
+                    max={50000}
+                    step={1000}
+                    value={lengthRange}
+                    onValueChange={(value) => setLengthRange(value as [number, number])}
+                    className="w-full"
+                  />
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>0</span>
+                    <span>25k</span>
+                    <span>50k</span>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setLengthRange([0, 50000])}
+                  >
+                    Reset Range
+                  </Button>
+                </div>
+              </div>
+            )}
 
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
