@@ -101,6 +101,17 @@ interface Tag {
   user_id: string;
   created_at: string;
   updated_at: string;
+  category_id?: string | null;
+  tag_categories?: TagCategory | null;
+}
+
+interface TagCategory {
+  id: string;
+  name: string;
+  color: string;
+  user_id: string;
+  created_at: string;
+  updated_at: string;
 }
 
 type SortField = 'file_title' | 'status' | 'created_at';
@@ -204,6 +215,12 @@ export default function TranscriptionHistory() {
     new Set(savedPrefs.selectedTagFilters || [])
   );
   const [selectedColorTheme, setSelectedColorTheme] = useState<keyof typeof COLOR_THEMES>('tailwind');
+  const [tagCategories, setTagCategories] = useState<TagCategory[]>([]);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [showCategoryDialog, setShowCategoryDialog] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<TagCategory | null>(null);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [newCategoryColor, setNewCategoryColor] = useState('#6b7280');
 
   // Save filter preferences whenever they change
   useEffect(() => {
@@ -225,11 +242,14 @@ export default function TranscriptionHistory() {
   }, [searchQuery, contentSearchQuery, startDate, endDate, selectedStatuses, pageSize, sortField, sortDirection, visibleColumns, lengthRange, showAdvancedFilters, selectedTagFilters]);
 
 
-  // Fetch tags
+  // Fetch tags with categories
   const fetchTags = async () => {
     const { data, error } = await supabase
       .from("tags")
-      .select("*")
+      .select(`
+        *,
+        tag_categories (*)
+      `)
       .order("name", { ascending: true });
 
     if (error) {
@@ -239,10 +259,25 @@ export default function TranscriptionHistory() {
     }
   };
 
+  // Fetch categories
+  const fetchCategories = async () => {
+    const { data, error } = await supabase
+      .from("tag_categories")
+      .select("*")
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.error("Error fetching categories:", error);
+    } else {
+      setTagCategories(data || []);
+    }
+  };
+
   useEffect(() => {
     checkAuth();
     fetchLogs();
     fetchTags();
+    fetchCategories();
 
     // Set up realtime subscription
     const channel = supabase
@@ -926,7 +961,12 @@ export default function TranscriptionHistory() {
 
     const { error } = await supabase
       .from("tags")
-      .insert([{ name: newTagName.trim(), color: newTagColor, user_id: user.id }]);
+      .insert([{ 
+        name: newTagName.trim(), 
+        color: newTagColor, 
+        user_id: user.id,
+        category_id: selectedCategoryId 
+      }]);
 
     if (error) {
       console.error("Error creating tag:", error);
@@ -935,6 +975,7 @@ export default function TranscriptionHistory() {
       toast.success("Tag created successfully");
       setNewTagName('');
       setNewTagColor('#3b82f6');
+      setSelectedCategoryId(null);
       setShowTagDialog(false);
       fetchTags();
     }
@@ -948,7 +989,11 @@ export default function TranscriptionHistory() {
 
     const { error } = await supabase
       .from("tags")
-      .update({ name: newTagName.trim(), color: newTagColor })
+      .update({ 
+        name: newTagName.trim(), 
+        color: newTagColor,
+        category_id: selectedCategoryId 
+      })
       .eq("id", editingTag.id);
 
     if (error) {
@@ -959,6 +1004,7 @@ export default function TranscriptionHistory() {
       setEditingTag(null);
       setNewTagName('');
       setNewTagColor('#3b82f6');
+      setSelectedCategoryId(null);
       setShowTagDialog(false);
       fetchTags();
       fetchLogs(); // Refresh logs to show updated tag names
@@ -994,12 +1040,101 @@ export default function TranscriptionHistory() {
     setEditingTag(tag);
     setNewTagName(tag.name);
     setNewTagColor(tag.color);
+    setSelectedCategoryId(tag.category_id || null);
     setShowTagDialog(true);
   };
 
   const openManageTagsDialog = () => {
     setTagDialogMode('manage');
     setShowTagDialog(true);
+  };
+
+  // Category management handlers
+  const handleCreateCategory = async () => {
+    if (!newCategoryName.trim()) {
+      toast.error("Category name cannot be empty");
+      return;
+    }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { error } = await supabase
+      .from("tag_categories")
+      .insert([{ 
+        name: newCategoryName.trim(), 
+        color: newCategoryColor, 
+        user_id: user.id 
+      }]);
+
+    if (error) {
+      console.error("Error creating category:", error);
+      toast.error("Failed to create category");
+    } else {
+      toast.success("Category created successfully");
+      setNewCategoryName('');
+      setNewCategoryColor('#6b7280');
+      setShowCategoryDialog(false);
+      fetchCategories();
+    }
+  };
+
+  const handleEditCategory = async () => {
+    if (!editingCategory || !newCategoryName.trim()) {
+      toast.error("Category name cannot be empty");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("tag_categories")
+      .update({ 
+        name: newCategoryName.trim(), 
+        color: newCategoryColor 
+      })
+      .eq("id", editingCategory.id);
+
+    if (error) {
+      console.error("Error updating category:", error);
+      toast.error("Failed to update category");
+    } else {
+      toast.success("Category updated successfully");
+      setEditingCategory(null);
+      setNewCategoryName('');
+      setNewCategoryColor('#6b7280');
+      setShowCategoryDialog(false);
+      fetchCategories();
+      fetchTags(); // Refresh to update category info in tags
+    }
+  };
+
+  const handleDeleteCategory = async (categoryId: string) => {
+    const { error } = await supabase
+      .from("tag_categories")
+      .delete()
+      .eq("id", categoryId);
+
+    if (error) {
+      console.error("Error deleting category:", error);
+      toast.error("Failed to delete category");
+    } else {
+      toast.success("Category deleted successfully");
+      fetchCategories();
+      fetchTags(); // Refresh to remove category from tags
+    }
+  };
+
+  const openCreateCategoryDialog = () => {
+    setEditingCategory(null);
+    setNewCategoryName('');
+    setNewCategoryColor('#6b7280');
+    setShowCategoryDialog(true);
+  };
+
+  const openEditCategoryDialog = (category: TagCategory) => {
+    setEditingCategory(category);
+    setNewCategoryName(category.name);
+    setNewCategoryColor(category.color);
+    setShowCategoryDialog(true);
   };
 
   // Tag assignment handlers
@@ -2781,12 +2916,18 @@ export default function TranscriptionHistory() {
             <div className="space-y-4">
               <div className="flex justify-between items-center">
                 <span className="text-sm text-muted-foreground">
-                  {tags.length} tag{tags.length !== 1 ? 's' : ''}
+                  {tags.length} tag{tags.length !== 1 ? 's' : ''} • {tagCategories.length} categor{tagCategories.length !== 1 ? 'ies' : 'y'}
                 </span>
-                <Button size="sm" onClick={openCreateTagDialog}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  New Tag
-                </Button>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={openCreateCategoryDialog}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    New Category
+                  </Button>
+                  <Button size="sm" onClick={openCreateTagDialog}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    New Tag
+                  </Button>
+                </div>
               </div>
 
               {tags.length === 0 ? (
@@ -2796,38 +2937,97 @@ export default function TranscriptionHistory() {
                   <p className="text-sm">Create your first tag to get started</p>
                 </div>
               ) : (
-                <div className="space-y-2">
-                  {tags.map((tag) => (
-                    <div
-                      key={tag.id}
-                      className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div
-                          className="w-4 h-4 rounded"
-                          style={{ backgroundColor: tag.color }}
-                        />
-                        <span className="font-medium">{tag.name}</span>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => openEditTagDialog(tag)}
-                        >
-                          <Edit2 className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDeleteTag(tag.id)}
-                          className="text-destructive hover:text-destructive"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                <div className="space-y-4">
+                  {/* Uncategorized Tags */}
+                  {tags.filter(tag => !tag.category_id).length > 0 && (
+                    <div>
+                      <h5 className="text-xs font-medium text-muted-foreground mb-2">Uncategorized</h5>
+                      <div className="space-y-2">
+                        {tags.filter(tag => !tag.category_id).map((tag) => (
+                          <div
+                            key={tag.id}
+                            className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                          >
+                            <div className="flex items-center gap-3">
+                              <div
+                                className="w-4 h-4 rounded"
+                                style={{ backgroundColor: tag.color }}
+                              />
+                              <span className="font-medium">{tag.name}</span>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => openEditTagDialog(tag)}
+                              >
+                                <Edit2 className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDeleteTag(tag.id)}
+                                className="text-destructive hover:text-destructive"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  ))}
+                  )}
+
+                  {/* Categorized Tags */}
+                  {tagCategories.map((category) => {
+                    const categoryTags = tags.filter(tag => tag.category_id === category.id);
+                    if (categoryTags.length === 0) return null;
+
+                    return (
+                      <div key={category.id}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <div
+                            className="w-3 h-3 rounded"
+                            style={{ backgroundColor: category.color }}
+                          />
+                          <h5 className="text-xs font-medium text-muted-foreground">{category.name}</h5>
+                        </div>
+                        <div className="space-y-2">
+                          {categoryTags.map((tag) => (
+                            <div
+                              key={tag.id}
+                              className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div
+                                  className="w-4 h-4 rounded"
+                                  style={{ backgroundColor: tag.color }}
+                                />
+                                <span className="font-medium">{tag.name}</span>
+                              </div>
+                              <div className="flex gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => openEditTagDialog(tag)}
+                                >
+                                  <Edit2 className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleDeleteTag(tag.id)}
+                                  className="text-destructive hover:text-destructive"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -2940,6 +3140,7 @@ export default function TranscriptionHistory() {
                     setShowTagDialog(false);
                     setNewTagName('');
                     setNewTagColor('#3b82f6');
+                    setSelectedCategoryId(null);
                     setEditingTag(null);
                   }}
                 >
@@ -2953,6 +3154,73 @@ export default function TranscriptionHistory() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Category Management Dialog */}
+      <Dialog open={showCategoryDialog} onOpenChange={setShowCategoryDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Palette className="h-5 w-5" />
+              {editingCategory ? 'Edit Category' : 'Create Category'}
+            </DialogTitle>
+            <DialogDescription>
+              {editingCategory ? 'Update category name and color' : 'Create a new category to organize your tags'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="category-name">Category Name</Label>
+              <Input
+                id="category-name"
+                placeholder="e.g., Project Types, Clients, Priority"
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                maxLength={50}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="category-color">Category Color</Label>
+              <div className="flex items-center gap-4">
+                <Input
+                  id="category-color"
+                  type="color"
+                  value={newCategoryColor}
+                  onChange={(e) => setNewCategoryColor(e.target.value)}
+                  className="w-24 h-10 cursor-pointer"
+                />
+                <div className="flex items-center gap-2">
+                  <div
+                    className="w-8 h-8 rounded border"
+                    style={{ backgroundColor: newCategoryColor }}
+                  />
+                  <span className="text-sm text-muted-foreground font-mono">{newCategoryColor}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowCategoryDialog(false);
+                  setNewCategoryName('');
+                  setNewCategoryColor('#6b7280');
+                  setEditingCategory(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={editingCategory ? handleEditCategory : handleCreateCategory}
+              >
+                {editingCategory ? 'Save Changes' : 'Create Category'}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 
