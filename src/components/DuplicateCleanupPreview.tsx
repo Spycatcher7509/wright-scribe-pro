@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import JSZip from "jszip";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -29,7 +30,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Loader2, FileText, Check, X, Shield, ShieldOff, Trash2, Keyboard, Search, Filter, CalendarIcon, Save, Star, StarOff, Download, Upload } from "lucide-react";
+import { Loader2, FileText, Check, X, Shield, ShieldOff, Trash2, Keyboard, Search, Filter, CalendarIcon, Save, Star, StarOff, Download, Upload, FolderDown } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { toast } from "sonner";
 
@@ -68,6 +69,7 @@ export function DuplicateCleanupPreview({
   const [presetDescription, setPresetDescription] = useState("");
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
+  const [isBulkExporting, setIsBulkExporting] = useState(false);
   // Fetch filter presets
   const { data: filterPresets } = useQuery({
     queryKey: ["cleanup-filter-presets"],
@@ -481,6 +483,61 @@ export function DuplicateCleanupPreview({
     }
   };
 
+  const exportAllPresets = async () => {
+    if (!filterPresets || filterPresets.length === 0) {
+      toast.error("No presets to export");
+      return;
+    }
+
+    setIsBulkExporting(true);
+    try {
+      const zip = new JSZip();
+      const presetsFolder = zip.folder("filter-presets");
+
+      // Add each preset as a separate JSON file
+      filterPresets.forEach((preset) => {
+        const exportData = {
+          name: preset.name,
+          description: preset.description,
+          filter_data: preset.filter_data,
+          exported_at: new Date().toISOString(),
+          version: "1.0"
+        };
+        
+        const filename = `${preset.name.toLowerCase().replace(/\s+/g, '-')}.json`;
+        presetsFolder?.file(filename, JSON.stringify(exportData, null, 2));
+      });
+
+      // Add a manifest file
+      const manifest = {
+        exported_at: new Date().toISOString(),
+        total_presets: filterPresets.length,
+        presets: filterPresets.map(p => ({
+          name: p.name,
+          description: p.description
+        }))
+      };
+      presetsFolder?.file("manifest.json", JSON.stringify(manifest, null, 2));
+
+      // Generate and download the ZIP
+      const blob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `filter-presets-backup-${format(new Date(), "yyyy-MM-dd")}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      toast.success(`Exported ${filterPresets.length} preset${filterPresets.length !== 1 ? 's' : ''} successfully`);
+    } catch (error: any) {
+      toast.error("Failed to export presets: " + error.message);
+    } finally {
+      setIsBulkExporting(false);
+    }
+  };
+
   // Keyboard shortcuts
   useEffect(() => {
     if (!enabled || !filteredDuplicates || filteredDuplicates.length === 0) return;
@@ -679,6 +736,21 @@ export function DuplicateCleanupPreview({
             >
               <Upload className="h-4 w-4" />
             </Button>
+            {filterPresets && filterPresets.length > 0 && (
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={exportAllPresets}
+                disabled={isBulkExporting}
+                title="Export all presets as ZIP"
+              >
+                {isBulkExporting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <FolderDown className="h-4 w-4" />
+                )}
+              </Button>
+            )}
           </div>
           
           {filterPresets && filterPresets.length > 0 && (
