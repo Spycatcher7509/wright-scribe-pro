@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { User, Session } from "@supabase/supabase-js";
+import { User as SupabaseUser, Session } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, FileAudio, History, Mail, Database, Users, Shield } from "lucide-react";
+import { LogOut, FileAudio, History, Mail, Database, Users, Shield, User } from "lucide-react";
 import { toast } from "sonner";
 import { DisclaimerModal } from "@/components/DisclaimerModal";
 import { TranscriptionUpload } from "@/components/TranscriptionUpload";
@@ -15,7 +15,7 @@ import { DuplicateCleanupConfig } from "@/components/DuplicateCleanupConfig";
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<SupabaseUser | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [showDisclaimer, setShowDisclaimer] = useState(true);
   const [userRole, setUserRole] = useState<string | null>(null);
@@ -178,10 +178,16 @@ export default function Dashboard() {
               )}
             </div>
           </div>
-          <Button variant="outline" onClick={handleSignOut}>
-            <LogOut className="mr-2 h-4 w-4" />
-            Sign Out
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => navigate("/profile")}>
+              <User className="mr-2 h-4 w-4" />
+              Profile
+            </Button>
+            <Button variant="outline" onClick={handleSignOut}>
+              <LogOut className="mr-2 h-4 w-4" />
+              Sign Out
+            </Button>
+          </div>
         </div>
       </header>
 
