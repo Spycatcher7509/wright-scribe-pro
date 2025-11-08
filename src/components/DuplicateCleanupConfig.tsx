@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Database, Loader2, Trash2, Play } from "lucide-react";
+import { Database, Loader2, Trash2, Play, Clock } from "lucide-react";
 
 const scheduleOptions = [
   { value: "0 0 * * 0", label: "Weekly (Sunday midnight)" },
@@ -49,6 +49,60 @@ export function DuplicateCleanupConfig() {
       return data;
     },
   });
+
+  const { data: lastCleanup } = useQuery({
+    queryKey: ["last-cleanup"],
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      const { data, error } = await supabase
+        .from("duplicate_cleanup_history")
+        .select("run_at")
+        .eq("user_id", user.id)
+        .order("run_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) throw error;
+      return data;
+    },
+    enabled: enabled,
+  });
+
+  const getNextScheduledRun = () => {
+    if (!enabled || !lastCleanup?.run_at) return null;
+
+    const lastRun = new Date(lastCleanup.run_at);
+    const now = new Date();
+
+    // Parse schedule to determine next run
+    const parts = runSchedule.split(' ');
+    if (parts.length < 5) return null;
+
+    const weekday = parts[4];
+    const dayOfMonth = parts[2];
+
+    let nextRun = new Date(lastRun);
+
+    if (weekday !== '*') {
+      // Weekly schedule
+      nextRun.setDate(nextRun.getDate() + 7);
+    } else if (dayOfMonth !== '*' && dayOfMonth !== '1') {
+      // Specific day of month
+      nextRun.setMonth(nextRun.getMonth() + 1);
+    } else if (dayOfMonth === '1') {
+      // Monthly on first day
+      nextRun.setMonth(nextRun.getMonth() + 1);
+    } else {
+      // Daily
+      nextRun.setDate(nextRun.getDate() + 1);
+    }
+
+    return nextRun > now ? nextRun : null;
+  };
+
+  const nextRun = getNextScheduledRun();
 
   const updateConfigMutation = useMutation({
     mutationFn: async (e: React.FormEvent) => {
@@ -155,6 +209,18 @@ export function DuplicateCleanupConfig() {
               onCheckedChange={setEnabled}
             />
           </div>
+
+          {enabled && nextRun && (
+            <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg border border-border">
+              <Clock className="h-4 w-4 text-muted-foreground" />
+              <div className="text-sm">
+                <span className="text-muted-foreground">Next scheduled cleanup: </span>
+                <span className="font-medium">
+                  {nextRun.toLocaleDateString("en-GB")} at {nextRun.toLocaleTimeString("en-GB", { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              </div>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="schedule">Cleanup Schedule</Label>
