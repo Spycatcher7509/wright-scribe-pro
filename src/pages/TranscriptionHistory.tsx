@@ -148,6 +148,7 @@ interface FilterPreset {
   avg_rating?: number;
   rating_count?: number;
   user_rating?: number;
+  clone_count?: number;
 }
 
 interface PresetComment {
@@ -307,6 +308,7 @@ export default function TranscriptionHistory() {
   const [presetComments, setPresetComments] = useState<Map<string, PresetComment[]>>(new Map());
   const [newComment, setNewComment] = useState('');
   const [selectedPresetForComments, setSelectedPresetForComments] = useState<FilterPreset | null>(null);
+  const [marketplaceSortBy, setMarketplaceSortBy] = useState<'rating' | 'clones' | 'recent'>('rating');
 
   // Save filter preferences whenever they change
   useEffect(() => {
@@ -558,8 +560,7 @@ export default function TranscriptionHistory() {
           profiles!inner(email)
         `)
         .eq('is_shared', true)
-        .neq('user_id', currentUser?.id || '')
-        .order('created_at', { ascending: false });
+        .neq('user_id', currentUser?.id || '');
 
       if (error) {
         console.error('Error fetching shared presets:', error);
@@ -910,6 +911,12 @@ export default function TranscriptionHistory() {
       toast.error('Failed to clone preset');
       return;
     }
+
+    // Increment clone count for the original preset
+    await supabase
+      .from('filter_presets')
+      .update({ clone_count: (preset.clone_count || 0) + 1 })
+      .eq('id', preset.id);
 
     toast.success(`Cloned "${preset.name}" to your presets`);
   };
@@ -4832,6 +4839,21 @@ export default function TranscriptionHistory() {
             </DialogDescription>
           </DialogHeader>
 
+          {/* Sort Controls */}
+          <div className="flex items-center gap-2 px-1 pb-4">
+            <Label className="text-sm font-medium">Sort by:</Label>
+            <Select value={marketplaceSortBy} onValueChange={(value: any) => setMarketplaceSortBy(value)}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="rating">Highest Rated</SelectItem>
+                <SelectItem value="clones">Most Cloned</SelectItem>
+                <SelectItem value="recent">Most Recent</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
           <div className="flex-1 overflow-y-auto">
             {sharedPresets.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -4843,7 +4865,17 @@ export default function TranscriptionHistory() {
               </div>
             ) : (
               <div className="grid gap-4">
-                {sharedPresets.map((preset) => (
+                {[...sharedPresets]
+                  .sort((a, b) => {
+                    if (marketplaceSortBy === 'rating') {
+                      return (b.avg_rating || 0) - (a.avg_rating || 0);
+                    } else if (marketplaceSortBy === 'clones') {
+                      return (b.clone_count || 0) - (a.clone_count || 0);
+                    } else {
+                      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+                    }
+                  })
+                  .map((preset) => (
                   <Card key={preset.id} className="hover:shadow-md transition-shadow">
                     <CardContent className="p-4">
                       <div className="flex items-start justify-between gap-4">
@@ -4922,6 +4954,12 @@ export default function TranscriptionHistory() {
                               <span>Shared by: {preset.profiles?.email || 'Unknown'}</span>
                               <span>•</span>
                               <span>{format(new Date(preset.created_at), 'MMM d, yyyy')}</span>
+                              {preset.clone_count !== undefined && preset.clone_count > 0 && (
+                                <>
+                                  <span>•</span>
+                                  <span>{preset.clone_count} clone{preset.clone_count !== 1 ? 's' : ''}</span>
+                                </>
+                              )}
                             </div>
                           </div>
 

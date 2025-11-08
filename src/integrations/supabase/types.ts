@@ -49,6 +49,7 @@ export type Database = {
       }
       filter_presets: {
         Row: {
+          clone_count: number
           created_at: string
           description: string | null
           filter_data: Json
@@ -59,6 +60,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          clone_count?: number
           created_at?: string
           description?: string | null
           filter_data: Json
@@ -69,6 +71,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          clone_count?: number
           created_at?: string
           description?: string | null
           filter_data?: Json
