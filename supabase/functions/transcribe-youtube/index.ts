@@ -377,92 +377,9 @@ async function getYouTubeContent(
     return { text: transcript, title, method: "transcript_api", language };
   }
 
-  // If no transcript available, use third-party audio extraction service
-  console.log("No captions available - attempting audio download");
-  
-  try {
-    if (updateProgress) {
-      await updateProgress('downloading', 10, 'Fetching audio stream URL...');
-    }
-
-    // Use a third-party API to get the audio URL
-    // Note: This requires the video to be publicly accessible
-    const audioApiUrl = `https://www.yt-download.org/api/json/info?url=https://www.youtube.com/watch?v=${videoId}`;
-    
-    console.log("Fetching audio URL from:", audioApiUrl);
-    const audioInfoResponse = await fetch(audioApiUrl);
-    
-    if (!audioInfoResponse.ok) {
-      throw new Error(`Failed to get audio info: ${audioInfoResponse.status}`);
-    }
-
-    const audioInfo = await audioInfoResponse.json();
-    
-    if (!audioInfo.url) {
-      throw new Error("No audio URL available from download service");
-    }
-
-    console.log("Got audio URL, downloading...");
-    
-    if (updateProgress) {
-      await updateProgress('downloading', 30, 'Downloading audio file...');
-    }
-
-    const audioResponse = await fetch(audioInfo.url);
-    
-    if (!audioResponse.ok) {
-      throw new Error(`Failed to download audio: ${audioResponse.status}`);
-    }
-
-    const audioArrayBuffer = await audioResponse.arrayBuffer();
-    const audioBlob = new Blob([audioArrayBuffer], { type: 'audio/webm' });
-    console.log(`Audio downloaded: ${audioBlob.size} bytes`);
-    
-    if (updateProgress) {
-      await updateProgress('transcribing', 60, 'Transcribing audio with OpenAI Whisper...');
-    }
-
-    // Transcribe using OpenAI Whisper
-    console.log("Transcribing with OpenAI Whisper...");
-    const formData = new FormData();
-    formData.append('file', audioBlob, 'audio.webm');
-    formData.append('model', 'whisper-1');
-    if (language !== 'en') {
-      formData.append('language', language);
-    }
-    
-    const whisperResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${openAIApiKey}`,
-      },
-      body: formData,
-    });
-    
-    if (!whisperResponse.ok) {
-      const errorText = await whisperResponse.text();
-      console.error("Whisper API error:", errorText);
-      throw new Error(`Whisper transcription failed: ${whisperResponse.status}`);
-    }
-    
-    const whisperData = await whisperResponse.json();
-    console.log("Whisper transcription complete");
-    
-    if (updateProgress) {
-      await updateProgress('completed', 100, 'Transcription complete!');
-    }
-
-    return { 
-      text: whisperData.text, 
-      title, 
-      method: "whisper_transcription",
-      language: whisperData.language || language
-    };
-    
-  } catch (audioError: any) {
-    console.error("Audio transcription failed:", audioError);
-    throw new Error(`Failed to transcribe audio: ${audioError.message}`);
-  }
+  // No captions available - return info for client-side audio download
+  console.log("No captions available for this video");
+  throw new Error("NO_CAPTIONS_AVAILABLE");
 }
 
 serve(async (req: Request) => {

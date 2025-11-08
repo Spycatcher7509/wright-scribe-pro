@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.monitor-transcription-errors]
 verify_jwt = false
+
+[functions.get-youtube-audio-url]
+verify_jwt = true
