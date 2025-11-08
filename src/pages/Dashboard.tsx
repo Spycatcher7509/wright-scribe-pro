@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { DisclaimerModal } from "@/components/DisclaimerModal";
 import { TranscriptionUpload } from "@/components/TranscriptionUpload";
 import { DuplicateCleanupConfig } from "@/components/DuplicateCleanupConfig";
+import { DuplicateCleanupHistory } from "@/components/DuplicateCleanupHistory";
 import { NotificationBell } from "@/components/NotificationBell";
 
 export default function Dashboard() {
@@ -275,6 +276,7 @@ export default function Dashboard() {
           <TabsContent value="backup">
             <div className="space-y-6">
               <DuplicateCleanupConfig />
+              <DuplicateCleanupHistory />
               <Card className="p-6">
                 <h2 className="text-xl font-semibold mb-4">Backup & Export</h2>
                 <p className="text-muted-foreground">
