@@ -11,6 +11,7 @@ import { LogOut, FileAudio, History, Mail, Database, Users, Shield } from "lucid
 import { toast } from "sonner";
 import { DisclaimerModal } from "@/components/DisclaimerModal";
 import { TranscriptionUpload } from "@/components/TranscriptionUpload";
+import { DuplicateCleanupConfig } from "@/components/DuplicateCleanupConfig";
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -234,12 +235,15 @@ export default function Dashboard() {
           </TabsContent>
 
           <TabsContent value="backup">
-            <Card className="p-6">
-              <h2 className="text-xl font-semibold mb-4">Backup & Export</h2>
-              <p className="text-muted-foreground">
-                Export your data and view backup history.
-              </p>
-            </Card>
+            <div className="space-y-6">
+              <DuplicateCleanupConfig />
+              <Card className="p-6">
+                <h2 className="text-xl font-semibold mb-4">Backup & Export</h2>
+                <p className="text-muted-foreground">
+                  Export your data and view backup history.
+                </p>
+              </Card>
+            </div>
           </TabsContent>
 
           {isAdmin && (
