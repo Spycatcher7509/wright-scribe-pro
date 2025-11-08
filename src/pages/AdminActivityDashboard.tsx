@@ -8,9 +8,11 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { ArrowLeft, Activity, Search, Filter, FileAudio, Settings, Shield, LogIn, Upload, Loader2 } from "lucide-react";
+import { ArrowLeft, Activity, Search, Filter, FileAudio, Settings, Shield, LogIn, Upload, Loader2, Download, FileJson, FileSpreadsheet } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
+import { exportToCSV, exportToJSON, formatActivityLogsForExport } from "@/lib/exportUtils";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 interface ActivityLog {
   id: string;
@@ -169,6 +171,38 @@ const AdminActivityDashboard = () => {
     return matchesSearch;
   });
 
+  const handleExportCSV = () => {
+    try {
+      if (!filteredLogs || filteredLogs.length === 0) {
+        toast.error("No data to export");
+        return;
+      }
+
+      const exportData = formatActivityLogsForExport(filteredLogs, users || []);
+      const timestamp = new Date().toISOString().split('T')[0];
+      exportToCSV(exportData, `activity-logs-${timestamp}.csv`);
+      toast.success("Activity logs exported as CSV");
+    } catch (error: any) {
+      toast.error("Export failed: " + error.message);
+    }
+  };
+
+  const handleExportJSON = () => {
+    try {
+      if (!filteredLogs || filteredLogs.length === 0) {
+        toast.error("No data to export");
+        return;
+      }
+
+      const exportData = formatActivityLogsForExport(filteredLogs, users || []);
+      const timestamp = new Date().toISOString().split('T')[0];
+      exportToJSON(exportData, `activity-logs-${timestamp}.json`);
+      toast.success("Activity logs exported as JSON");
+    } catch (error: any) {
+      toast.error("Export failed: " + error.message);
+    }
+  };
+
   if (!isAdmin) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -203,10 +237,30 @@ const AdminActivityDashboard = () => {
                   </CardDescription>
                 </div>
               </div>
-              <Badge variant="destructive" className="h-6">
-                <Shield className="h-3 w-3 mr-1" />
-                Admin Only
-              </Badge>
+              <div className="flex items-center gap-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      <Download className="h-4 w-4 mr-2" />
+                      Export
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={handleExportCSV}>
+                      <FileSpreadsheet className="h-4 w-4 mr-2" />
+                      Export as CSV
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleExportJSON}>
+                      <FileJson className="h-4 w-4 mr-2" />
+                      Export as JSON
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Badge variant="destructive" className="h-6">
+                  <Shield className="h-3 w-3 mr-1" />
+                  Admin Only
+                </Badge>
+              </div>
             </div>
           </CardHeader>
           <CardContent>
