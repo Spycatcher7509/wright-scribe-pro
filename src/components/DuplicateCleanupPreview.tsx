@@ -1,9 +1,11 @@
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Loader2, FileText, Check, X, Shield, ShieldOff } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
@@ -32,6 +34,7 @@ export function DuplicateCleanupPreview({
   enabled 
 }: DuplicateCleanupPreviewProps) {
   const queryClient = useQueryClient();
+  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
   const { data: duplicates, isLoading } = useQuery({
     queryKey: ["cleanup-preview", keepLatest, deleteOlderThanDays],
     queryFn: async () => {
@@ -141,6 +144,65 @@ export function DuplicateCleanupPreview({
     },
   });
 
+  const bulkProtectMutation = useMutation({
+    mutationFn: async ({ ids, protect }: { ids: string[]; protect: boolean }) => {
+      const { error } = await supabase
+        .from("transcription_logs")
+        .update({ is_protected: protect })
+        .in("id", ids);
+
+      if (error) throw error;
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["cleanup-preview"] });
+      setSelectedFiles(new Set());
+      toast.success(
+        `${variables.ids.length} file${variables.ids.length !== 1 ? 's' : ''} ${
+          variables.protect ? 'protected' : 'unprotected'
+        }`
+      );
+    },
+    onError: (error: any) => {
+      toast.error("Failed to update protection: " + error.message);
+    },
+  });
+
+  const toggleFileSelection = (fileId: string) => {
+    const newSelected = new Set(selectedFiles);
+    if (newSelected.has(fileId)) {
+      newSelected.delete(fileId);
+    } else {
+      newSelected.add(fileId);
+    }
+    setSelectedFiles(newSelected);
+  };
+
+  const toggleGroupSelection = (files: Array<{ id: string }>) => {
+    const fileIds = files.map(f => f.id);
+    const allSelected = fileIds.every(id => selectedFiles.has(id));
+    
+    const newSelected = new Set(selectedFiles);
+    if (allSelected) {
+      fileIds.forEach(id => newSelected.delete(id));
+    } else {
+      fileIds.forEach(id => newSelected.add(id));
+    }
+    setSelectedFiles(newSelected);
+  };
+
+  const selectAll = () => {
+    if (!duplicates) return;
+    const allFiles = new Set<string>();
+    duplicates.forEach(group => {
+      group.files.forEach(file => allFiles.add(file.id));
+    });
+    setSelectedFiles(allFiles);
+  };
+
+  const deselectAll = () => {
+    setSelectedFiles(new Set());
+  };
+
   if (isLoading) {
     return (
       <Card>
@@ -188,6 +250,38 @@ export function DuplicateCleanupPreview({
             )}
           </div>
         </div>
+        
+        {selectedFiles.size > 0 && (
+          <div className="flex items-center gap-2 p-3 bg-muted rounded-lg border border-border mt-4">
+            <Badge variant="outline">{selectedFiles.size} selected</Badge>
+            <div className="flex-1" />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => bulkProtectMutation.mutate({ ids: Array.from(selectedFiles), protect: true })}
+              disabled={bulkProtectMutation.isPending}
+            >
+              <Shield className="h-3 w-3 mr-2" />
+              Protect
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => bulkProtectMutation.mutate({ ids: Array.from(selectedFiles), protect: false })}
+              disabled={bulkProtectMutation.isPending}
+            >
+              <ShieldOff className="h-3 w-3 mr-2" />
+              Unprotect
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={deselectAll}
+            >
+              Clear
+            </Button>
+          </div>
+        )}
       </CardHeader>
       <CardContent>
         {!duplicates || duplicates.length === 0 ? (
@@ -197,6 +291,27 @@ export function DuplicateCleanupPreview({
           </div>
         ) : (
           <ScrollArea className="h-[400px] pr-4">
+            <div className="space-y-2 mb-4">
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={selectAll}
+                  disabled={!duplicates || duplicates.length === 0}
+                >
+                  Select All
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={deselectAll}
+                  disabled={selectedFiles.size === 0}
+                >
+                  Deselect All
+                </Button>
+              </div>
+            </div>
+            
             <div className="space-y-4">
               {duplicates.map((group, groupIndex) => (
                 <div 
@@ -204,6 +319,10 @@ export function DuplicateCleanupPreview({
                   className="border border-border rounded-lg p-4 space-y-2"
                 >
                   <div className="flex items-center gap-2 mb-3">
+                    <Checkbox
+                      checked={group.files.every(f => selectedFiles.has(f.id))}
+                      onCheckedChange={() => toggleGroupSelection(group.files)}
+                    />
                     <FileText className="h-4 w-4 text-muted-foreground" />
                     <span className="text-sm font-medium">
                       Duplicate Group {groupIndex + 1}
@@ -225,13 +344,19 @@ export function DuplicateCleanupPreview({
                             : 'bg-muted/30 border-border'
                         }`}
                       >
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">
-                            {file.file_title}
-                          </p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Created {formatDistanceToNow(new Date(file.created_at), { addSuffix: true })}
-                          </p>
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <Checkbox
+                            checked={selectedFiles.has(file.id)}
+                            onCheckedChange={() => toggleFileSelection(file.id)}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">
+                              {file.file_title}
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Created {formatDistanceToNow(new Date(file.created_at), { addSuffix: true })}
+                            </p>
+                          </div>
                         </div>
                         <div className="flex items-center gap-2 ml-3">
                           <Button
