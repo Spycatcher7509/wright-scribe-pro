@@ -89,7 +89,11 @@ async function getYouTubeTranscript(videoId: string, language: string = 'en'): P
   
   try {
     // Fetch video page to extract transcript data
-    const videoPageResponse = await fetch(`https://www.youtube.com/watch?v=${videoId}`);
+    const videoPageResponse = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      }
+    });
     
     if (!videoPageResponse.ok) {
       console.log("Failed to fetch video page");
@@ -98,8 +102,13 @@ async function getYouTubeTranscript(videoId: string, language: string = 'en'): P
     
     const html = await videoPageResponse.text();
     
-    // Extract caption tracks from the page
-    const captionTracksMatch = html.match(/"captionTracks":\s*(\[.*?\])/);
+    // Extract caption tracks from the page - try multiple patterns
+    let captionTracksMatch = html.match(/"captionTracks":\s*(\[.*?\])/);
+    
+    // Alternative pattern for auto-generated captions
+    if (!captionTracksMatch) {
+      captionTracksMatch = html.match(/"captions":\s*\{[^}]*"playerCaptionsTracklistRenderer":\s*\{[^}]*"captionTracks":\s*(\[.*?\])/);
+    }
     
     if (!captionTracksMatch) {
       console.log("No captions found in video page");
@@ -126,7 +135,7 @@ async function getYouTubeTranscript(videoId: string, language: string = 'en'): P
       track = captionTracks[0];
     }
     
-    console.log(`Using caption track: ${track.languageCode || 'unknown'}`);
+    console.log(`Using caption track: ${track.languageCode || 'unknown'}${track.kind === 'asr' ? ' (auto-generated)' : ''}`);
     
     if (!track.baseUrl) {
       console.log("No baseUrl found in caption track");
@@ -494,7 +503,11 @@ serve(async (req: Request) => {
       console.log(`Checking caption availability for video: ${videoId}`);
       
       try {
-        const videoPageResponse = await fetch(`https://www.youtube.com/watch?v=${videoId}`);
+        const videoPageResponse = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          }
+        });
         
         if (!videoPageResponse.ok) {
           return new Response(
@@ -504,9 +517,17 @@ serve(async (req: Request) => {
         }
         
         const html = await videoPageResponse.text();
-        const captionTracksMatch = html.match(/"captionTracks":\s*(\[.*?\])/);
+        
+        // Try multiple patterns to find caption tracks
+        let captionTracksMatch = html.match(/"captionTracks":\s*(\[.*?\])/);
+        
+        // Alternative pattern for auto-generated captions
+        if (!captionTracksMatch) {
+          captionTracksMatch = html.match(/"captions":\s*\{[^}]*"playerCaptionsTracklistRenderer":\s*\{[^}]*"captionTracks":\s*(\[.*?\])/);
+        }
         
         if (!captionTracksMatch) {
+          console.log("No caption tracks found in HTML");
           return new Response(
             JSON.stringify({ available: false, languages: [] }),
             { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -526,6 +547,8 @@ serve(async (req: Request) => {
           if (b.code === 'en') return 1;
           return a.name.localeCompare(b.name);
         });
+        
+        console.log(`Found ${languages.length} caption language(s) for video ${videoId}`);
         
         return new Response(
           JSON.stringify({ available: true, languages }),
