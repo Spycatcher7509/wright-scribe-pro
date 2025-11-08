@@ -2,6 +2,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.80.0";
 import { Resend } from "https://esm.sh/resend@2.0.0";
+import { Innertube } from "https://esm.sh/youtubei.js@10.5.0/web";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -385,35 +386,22 @@ async function getYouTubeContent(
       await updateProgress('downloading', 10, 'Downloading audio...');
     }
 
-    const audioUrl = `https://www.youtube.com/watch?v=${videoId}`;
-    console.log("Downloading audio from:", audioUrl);
+    console.log("Initializing YouTube client...");
+    const youtube = await Innertube.create();
     
-    // Use yt-dlp command to get audio stream URL
-    const ytDlpProcess = new Deno.Command("yt-dlp", {
-      args: [
-        "--format", "bestaudio",
-        "--get-url",
-        "--no-playlist",
-        audioUrl
-      ],
-      stdout: "piped",
-      stderr: "piped"
-    });
+    console.log("Getting video info...");
+    const videoInfo = await youtube.getInfo(videoId);
     
-    console.log("Running yt-dlp to get audio URL...");
-    const { stdout, stderr, success } = await ytDlpProcess.output();
+    // Get the audio format
+    const audioFormat = videoInfo.chooseFormat({ type: 'audio', quality: 'best' });
     
-    if (!success) {
-      const errorText = new TextDecoder().decode(stderr);
-      console.error("yt-dlp error:", errorText);
-      throw new Error(`Failed to get audio URL: ${errorText}`);
+    if (!audioFormat?.decipher) {
+      throw new Error("Could not find audio stream");
     }
     
-    const audioStreamUrl = new TextDecoder().decode(stdout).trim();
-    console.log("Got audio stream URL, downloading...");
-    
-    // Download the audio
-    const audioResponse = await fetch(audioStreamUrl);
+    console.log("Downloading audio stream...");
+    const audioUrl = audioFormat.decipher(youtube.session.player);
+    const audioResponse = await fetch(audioUrl);
     
     if (!audioResponse.ok) {
       throw new Error(`Failed to download audio: ${audioResponse.status}`);
