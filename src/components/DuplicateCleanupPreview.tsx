@@ -89,6 +89,7 @@ export function DuplicateCleanupPreview({
   const [showRetentionSettings, setShowRetentionSettings] = useState(false);
   const [retentionDays, setRetentionDays] = useState(30);
   const [autoCleanupEnabled, setAutoCleanupEnabled] = useState(true);
+  const [selectedBackups, setSelectedBackups] = useState<Set<string>>(new Set());
   
   // Fetch retention settings
   const { data: retentionSettings } = useQuery({
@@ -1034,6 +1035,100 @@ export function DuplicateCleanupPreview({
     },
   });
 
+  const bulkRestoreBackups = useMutation({
+    mutationFn: async (backupIds: string[]) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      const { data: backupsToRestore, error: fetchError } = await supabase
+        .from("preset_backups")
+        .select("*")
+        .in("id", backupIds);
+
+      if (fetchError) throw fetchError;
+
+      for (const backup of backupsToRestore || []) {
+        const { data: existing } = await supabase
+          .from("filter_presets")
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("name", backup.preset_name)
+          .maybeSingle();
+
+        if (existing) {
+          const { error } = await supabase
+            .from("filter_presets")
+            .update({
+              description: backup.preset_description,
+              filter_data: backup.preset_filter_data,
+            })
+            .eq("id", existing.id);
+          
+          if (error) throw error;
+        } else {
+          const { error } = await supabase
+            .from("filter_presets")
+            .insert({
+              user_id: user.id,
+              name: backup.preset_name,
+              description: backup.preset_description,
+              filter_data: backup.preset_filter_data,
+            });
+          
+          if (error) throw error;
+        }
+      }
+    },
+    onSuccess: (_data, backupIds) => {
+      queryClient.invalidateQueries({ queryKey: ["cleanup-filter-presets"] });
+      setSelectedBackups(new Set());
+      toast.success(`Restored ${backupIds.length} backup${backupIds.length !== 1 ? 's' : ''}`);
+    },
+    onError: (error: any) => {
+      toast.error("Failed to restore backups: " + error.message);
+    },
+  });
+
+  const bulkDeleteBackups = useMutation({
+    mutationFn: async (backupIds: string[]) => {
+      const { error } = await supabase
+        .from("preset_backups")
+        .delete()
+        .in("id", backupIds);
+
+      if (error) throw error;
+    },
+    onSuccess: (_data, backupIds) => {
+      queryClient.invalidateQueries({ queryKey: ["preset-backups"] });
+      setSelectedBackups(new Set());
+      toast.success(`Deleted ${backupIds.length} backup${backupIds.length !== 1 ? 's' : ''}`);
+    },
+    onError: (error: any) => {
+      toast.error("Failed to delete backups: " + error.message);
+    },
+  });
+
+  const toggleBackupSelection = (backupId: string) => {
+    setSelectedBackups(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(backupId)) {
+        newSet.delete(backupId);
+      } else {
+        newSet.add(backupId);
+      }
+      return newSet;
+    });
+  };
+
+  const selectAllBackups = () => {
+    if (!presetBackups) return;
+    setSelectedBackups(new Set(presetBackups.map(b => b.id)));
+  };
+
+  const deselectAllBackups = () => {
+    setSelectedBackups(new Set());
+  };
+
   const exportAllPresets = async () => {
     if (!filterPresets || filterPresets.length === 0) {
       toast.error("No presets to export");
@@ -1968,26 +2063,102 @@ export function DuplicateCleanupPreview({
               Restore presets that were backed up before being overwritten during import
             </DialogDescription>
           </DialogHeader>
+          
+          {selectedBackups.size > 0 && (
+            <div className="flex items-center gap-2 p-3 bg-muted rounded-lg border">
+              <Badge variant="outline">{selectedBackups.size} selected</Badge>
+              <div className="flex-1" />
+              <Button
+                size="sm"
+                variant="default"
+                onClick={() => bulkRestoreBackups.mutate(Array.from(selectedBackups))}
+                disabled={bulkRestoreBackups.isPending}
+              >
+                {bulkRestoreBackups.isPending ? (
+                  <Loader2 className="h-3 w-3 mr-2 animate-spin" />
+                ) : (
+                  <RotateCcw className="h-3 w-3 mr-2" />
+                )}
+                Restore Selected
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => bulkDeleteBackups.mutate(Array.from(selectedBackups))}
+                disabled={bulkDeleteBackups.isPending}
+              >
+                {bulkDeleteBackups.isPending ? (
+                  <Loader2 className="h-3 w-3 mr-2 animate-spin" />
+                ) : (
+                  <Trash2 className="h-3 w-3 mr-2" />
+                )}
+                Delete Selected
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={deselectAllBackups}
+              >
+                Clear
+              </Button>
+            </div>
+          )}
+          
+          {presetBackups && presetBackups.length > 0 && (
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={selectAllBackups}
+              >
+                Select All
+              </Button>
+              {selectedBackups.size > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={deselectAllBackups}
+                >
+                  Deselect All
+                </Button>
+              )}
+            </div>
+          )}
+          
           <ScrollArea className="flex-1 pr-4">
             <div className="space-y-3">
               {presetBackups && presetBackups.length > 0 ? (
                 presetBackups.map((backup) => (
-                  <div key={backup.id} className="p-4 rounded-lg border bg-card space-y-3">
+                  <div 
+                    key={backup.id} 
+                    className={`p-4 rounded-lg border space-y-3 transition-colors ${
+                      selectedBackups.has(backup.id) 
+                        ? 'bg-primary/10 border-primary' 
+                        : 'bg-card'
+                    }`}
+                  >
                     <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium text-sm">{backup.preset_name}</div>
-                        {backup.preset_description && (
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {backup.preset_description}
-                          </p>
-                        )}
-                        <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
-                          <span>
-                            Backed up {formatDistanceToNow(new Date(backup.backed_up_at), { addSuffix: true })}
-                          </span>
-                          <Badge variant="outline" className="text-xs">
-                            {backup.backup_reason === 'import_overwrite' ? 'Import Overwrite' : backup.backup_reason}
-                          </Badge>
+                      <div className="flex items-start gap-3 flex-1 min-w-0">
+                        <Checkbox
+                          checked={selectedBackups.has(backup.id)}
+                          onCheckedChange={() => toggleBackupSelection(backup.id)}
+                          className="mt-0.5"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-sm">{backup.preset_name}</div>
+                          {backup.preset_description && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {backup.preset_description}
+                            </p>
+                          )}
+                          <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
+                            <span>
+                              Backed up {formatDistanceToNow(new Date(backup.backed_up_at), { addSuffix: true })}
+                            </span>
+                            <Badge variant="outline" className="text-xs">
+                              {backup.backup_reason === 'import_overwrite' ? 'Import Overwrite' : backup.backup_reason}
+                            </Badge>
+                          </div>
                         </div>
                       </div>
                       <div className="flex gap-2">
