@@ -1292,6 +1292,47 @@ export default function TranscriptionHistory() {
     }).filter(stat => stat.count > 0)
       .sort((a, b) => b.count - a.count);
 
+    // Tag usage trends over time (last 30 days)
+    const tagTrendsMap = new Map<string, Map<string, number>>();
+    const last30Days = Array.from({ length: 30 }, (_, i) => {
+      const date = subDays(new Date(), 29 - i);
+      return format(date, 'MMM dd');
+    });
+
+    // Initialize all dates and tags with 0
+    last30Days.forEach(date => {
+      const dateMap = new Map<string, number>();
+      tags.forEach(tag => {
+        dateMap.set(tag.id, 0);
+      });
+      tagTrendsMap.set(date, dateMap);
+    });
+
+    // Count tag usage per day
+    logs.forEach(log => {
+      const logDate = format(parseISO(log.created_at), 'MMM dd');
+      if (tagTrendsMap.has(logDate) && log.tags) {
+        const dateMap = tagTrendsMap.get(logDate)!;
+        log.tags.forEach(tag => {
+          const currentCount = dateMap.get(tag.id) || 0;
+          dateMap.set(tag.id, currentCount + 1);
+        });
+      }
+    });
+
+    // Convert to array format for recharts
+    const tagTrends = last30Days.map(date => {
+      const dateMap = tagTrendsMap.get(date)!;
+      const dataPoint: any = { date };
+      tags.forEach(tag => {
+        dataPoint[tag.id] = dateMap.get(tag.id) || 0;
+      });
+      return dataPoint;
+    });
+
+    // Get top 5 tags for trends display
+    const topTags = tagStats.slice(0, 5);
+
     return {
       successRateOverTime,
       hourlyActivity,
@@ -1299,6 +1340,8 @@ export default function TranscriptionHistory() {
       sizeRanges: sizeRanges.filter(r => r.count > 0),
       statusDistribution,
       tagStats,
+      tagTrends,
+      topTags,
     };
   }, [logs, completedCount, processingCount, failedCount, tags]);
 
@@ -1517,6 +1560,56 @@ export default function TranscriptionHistory() {
               {/* Tag Statistics */}
               {analyticsData.tagStats.length > 0 && (
                 <>
+                  <Card className="lg:col-span-3">
+                    <CardHeader>
+                      <CardTitle className="text-sm font-medium">Tag Usage Trends</CardTitle>
+                      <CardDescription className="text-xs">How tag usage has changed over time (last 30 days)</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <LineChart data={analyticsData.tagTrends}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis 
+                            dataKey="date" 
+                            tick={{ fontSize: 11 }}
+                            angle={-45}
+                            textAnchor="end"
+                            height={80}
+                          />
+                          <YAxis tick={{ fontSize: 12 }} />
+                          <Tooltip 
+                            contentStyle={{ 
+                              backgroundColor: 'hsl(var(--card))', 
+                              borderColor: 'hsl(var(--border))' 
+                            }}
+                          />
+                          <Legend 
+                            wrapperStyle={{ fontSize: '12px' }}
+                            iconType="line"
+                          />
+                          {analyticsData.topTags.map((tag) => (
+                            <Line
+                              key={tag.id}
+                              type="monotone"
+                              dataKey={tag.id}
+                              name={tag.name}
+                              stroke={tag.color}
+                              strokeWidth={2}
+                              dot={{ r: 3 }}
+                              activeDot={{ r: 5 }}
+                            />
+                          ))}
+                        </LineChart>
+                      </ResponsiveContainer>
+                      {analyticsData.topTags.length === 0 && (
+                        <div className="text-center py-8 text-muted-foreground">
+                          <Tag className="h-12 w-12 mx-auto mb-2 opacity-20" />
+                          <p>No tag usage data available</p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
                   <Card className="lg:col-span-2">
                     <CardHeader>
                       <CardTitle className="text-sm font-medium">Transcriptions by Tag</CardTitle>
