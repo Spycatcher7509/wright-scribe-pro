@@ -20,7 +20,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Loader2, FileText, Check, X, Shield, ShieldOff, Trash2, Keyboard, Search, Filter, CalendarIcon } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Loader2, FileText, Check, X, Shield, ShieldOff, Trash2, Keyboard, Search, Filter, CalendarIcon, Save, Star, StarOff } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { toast } from "sonner";
 
@@ -54,6 +63,27 @@ export function DuplicateCleanupPreview({
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState<"all" | "protected" | "to-delete" | "to-keep" | "date">("all");
   const [filterDate, setFilterDate] = useState<Date | undefined>(undefined);
+  const [showSavePresetDialog, setShowSavePresetDialog] = useState(false);
+  const [presetName, setPresetName] = useState("");
+  const [presetDescription, setPresetDescription] = useState("");
+  // Fetch filter presets
+  const { data: filterPresets } = useQuery({
+    queryKey: ["cleanup-filter-presets"],
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      const { data, error } = await supabase
+        .from("filter_presets")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      return data;
+    },
+  });
+
   const { data: duplicates, isLoading } = useQuery({
     queryKey: ["cleanup-preview", keepLatest, deleteOlderThanDays],
     queryFn: async () => {
@@ -237,6 +267,58 @@ export function DuplicateCleanupPreview({
     },
   });
 
+  const savePresetMutation = useMutation({
+    mutationFn: async ({ name, description }: { name: string; description: string }) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      const filterData = {
+        searchQuery,
+        filterType,
+        filterDate: filterDate?.toISOString(),
+      };
+
+      const { error } = await supabase
+        .from("filter_presets")
+        .insert({
+          user_id: user.id,
+          name,
+          description,
+          filter_data: filterData,
+        });
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["cleanup-filter-presets"] });
+      setShowSavePresetDialog(false);
+      setPresetName("");
+      setPresetDescription("");
+      toast.success("Filter preset saved");
+    },
+    onError: (error: any) => {
+      toast.error("Failed to save preset: " + error.message);
+    },
+  });
+
+  const deletePresetMutation = useMutation({
+    mutationFn: async (presetId: string) => {
+      const { error } = await supabase
+        .from("filter_presets")
+        .delete()
+        .eq("id", presetId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["cleanup-filter-presets"] });
+      toast.success("Preset deleted");
+    },
+    onError: (error: any) => {
+      toast.error("Failed to delete preset: " + error.message);
+    },
+  });
+
   const toggleFileSelection = (fileId: string) => {
     const newSelected = new Set(selectedFiles);
     if (newSelected.has(fileId)) {
@@ -310,6 +392,22 @@ export function DuplicateCleanupPreview({
     }
     
     setShowDeleteDialog(false);
+  };
+
+  const applyPreset = (preset: any) => {
+    const filterData = preset.filter_data;
+    setSearchQuery(filterData.searchQuery || "");
+    setFilterType(filterData.filterType || "all");
+    setFilterDate(filterData.filterDate ? new Date(filterData.filterDate) : undefined);
+    toast.success(`Preset "${preset.name}" applied`);
+  };
+
+  const saveCurrentAsPreset = () => {
+    if (!searchQuery && filterType === "all" && !filterDate) {
+      toast.error("Set some filters before saving a preset");
+      return;
+    }
+    setShowSavePresetDialog(true);
   };
 
   // Keyboard shortcuts
@@ -494,7 +592,43 @@ export function DuplicateCleanupPreview({
                 <SelectItem value="date">Older than date</SelectItem>
               </SelectContent>
             </Select>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={saveCurrentAsPreset}
+              title="Save current filters as preset"
+            >
+              <Save className="h-4 w-4" />
+            </Button>
           </div>
+          
+          {filterPresets && filterPresets.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              <span className="text-sm text-muted-foreground self-center">Quick apply:</span>
+              {filterPresets.map((preset) => (
+                <div key={preset.id} className="flex items-center gap-1">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => applyPreset(preset)}
+                    className="h-7 text-xs"
+                  >
+                    <Star className="h-3 w-3 mr-1" />
+                    {preset.name}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => deletePresetMutation.mutate(preset.id)}
+                    className="h-7 w-7"
+                    title="Delete preset"
+                  >
+                    <X className="h-3 w-3" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
           
           {filterType === "date" && (
             <Popover>
