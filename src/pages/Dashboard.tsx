@@ -63,7 +63,7 @@ export default function Dashboard() {
       .from("user_roles")
       .select("role")
       .eq("user_id", userId)
-      .single();
+      .maybeSingle();
 
     if (error) {
       console.error("Error fetching role:", error);
@@ -77,6 +77,10 @@ export default function Dashboard() {
       if (data.role === "admin") {
         fetchAllUsers();
       }
+    } else {
+      // No role found, set default
+      setUserRole("user");
+      setIsAdmin(false);
     }
   };
 
@@ -85,7 +89,7 @@ export default function Dashboard() {
       .from("profiles")
       .select("avatar_url")
       .eq("id", userId)
-      .single();
+      .maybeSingle();
 
     if (!error && data) {
       setAvatarUrl(data.avatar_url);
