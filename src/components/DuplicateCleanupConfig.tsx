@@ -1,14 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useToast } from "@/hooks/use-toast";
-import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
+import { Database, Loader2, Trash2, Play } from "lucide-react";
 
 const scheduleOptions = [
   { value: "0 0 * * 0", label: "Weekly (Sunday midnight)" },
@@ -19,45 +19,42 @@ const scheduleOptions = [
 ];
 
 export function DuplicateCleanupConfig() {
-  const { toast } = useToast();
   const queryClient = useQueryClient();
   const [enabled, setEnabled] = useState(false);
   const [keepLatest, setKeepLatest] = useState(true);
   const [deleteOlderThanDays, setDeleteOlderThanDays] = useState(30);
   const [runSchedule, setRunSchedule] = useState("0 0 * * 0");
-  const [configId, setConfigId] = useState<string | null>(null);
 
-  const { isLoading } = useQuery({
-    queryKey: ["duplicate-cleanup-config"],
+  const { data: config, isLoading } = useQuery({
+    queryKey: ["cleanup-config"],
     queryFn: async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
-      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/duplicate_cleanup_config?user_id=eq.${user.id}&select=*`, {
-        headers: {
-          'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-          'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
-        },
-      });
+      const { data, error } = await supabase
+        .from("duplicate_cleanup_config")
+        .select("*")
+        .eq("user_id", user.id)
+        .maybeSingle();
 
-      const data = await response.json();
-      if (data && data.length > 0) {
-        const config = data[0];
-        setEnabled(config.enabled);
-        setKeepLatest(config.keep_latest);
-        setDeleteOlderThanDays(config.delete_older_than_days);
-        setRunSchedule(config.run_schedule);
-        setConfigId(config.id);
+      if (error) throw error;
+
+      if (data) {
+        setEnabled(data.enabled);
+        setKeepLatest(data.keep_latest);
+        setDeleteOlderThanDays(data.delete_older_than_days);
+        setRunSchedule(data.run_schedule);
       }
+
       return data;
     },
   });
 
-  const saveMutation = useMutation({
-    mutationFn: async () => {
+  const updateConfigMutation = useMutation({
+    mutationFn: async (e: React.FormEvent) => {
+      e.preventDefault();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
-      const session = await supabase.auth.getSession();
 
       const configData = {
         user_id: user.id,
@@ -67,47 +64,54 @@ export function DuplicateCleanupConfig() {
         run_schedule: runSchedule,
       };
 
-      if (configId) {
-        const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/duplicate_cleanup_config?id=eq.${configId}`, {
-          method: 'PATCH',
-          headers: {
-            'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-            'Authorization': `Bearer ${session.data.session?.access_token}`,
-            'Content-Type': 'application/json',
-            'Prefer': 'return=minimal',
-          },
-          body: JSON.stringify(configData),
-        });
+      if (config?.id) {
+        const { error } = await supabase
+          .from("duplicate_cleanup_config")
+          .update(configData)
+          .eq("id", config.id);
 
-        if (!response.ok) throw new Error('Failed to update config');
+        if (error) throw error;
       } else {
-        const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/duplicate_cleanup_config`, {
-          method: 'POST',
-          headers: {
-            'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-            'Authorization': `Bearer ${session.data.session?.access_token}`,
-            'Content-Type': 'application/json',
-            'Prefer': 'return=minimal',
-          },
-          body: JSON.stringify(configData),
-        });
+        const { error } = await supabase
+          .from("duplicate_cleanup_config")
+          .insert(configData);
 
-        if (!response.ok) throw new Error('Failed to create config');
+        if (error) throw error;
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["duplicate-cleanup-config"] });
-      toast({
-        title: "Configuration saved",
-        description: "Cleanup settings have been updated successfully.",
-      });
+      queryClient.invalidateQueries({ queryKey: ["cleanup-config"] });
+      toast.success("Configuration saved successfully");
     },
-    onError: (error) => {
-      toast({
-        title: "Error",
-        description: error.message,
-        variant: "destructive",
+    onError: (error: any) => {
+      toast.error("Failed to save configuration: " + error.message);
+    },
+  });
+
+  // Manual cleanup trigger
+  const runCleanupMutation = useMutation({
+    mutationFn: async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Not authenticated");
+
+      const response = await supabase.functions.invoke("cleanup-duplicates", {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
       });
+
+      if (response.error) throw response.error;
+      return response.data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["cleanup-config"] });
+      queryClient.invalidateQueries({ queryKey: ["cleanup-history"] });
+      toast.success(
+        `Cleanup completed! Removed ${data.filesDeleted} duplicates (${data.spaceFreed}MB freed)`
+      );
+    },
+    onError: (error: any) => {
+      toast.error("Cleanup failed: " + error.message);
     },
   });
 
@@ -124,78 +128,125 @@ export function DuplicateCleanupConfig() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Automatic Cleanup Configuration</CardTitle>
-        <CardDescription>
-          Configure automatic cleanup rules for duplicate transcriptions
-        </CardDescription>
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center">
+            <Trash2 className="h-5 w-5 text-destructive" />
+          </div>
+          <div>
+            <CardTitle>Automatic Cleanup Configuration</CardTitle>
+            <CardDescription>
+              Configure automatic cleanup rules for duplicate transcriptions
+            </CardDescription>
+          </div>
+        </div>
       </CardHeader>
-      <CardContent className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div className="space-y-0.5">
-            <Label htmlFor="enabled">Enable Automatic Cleanup</Label>
+      <CardContent>
+        <form onSubmit={(e) => updateConfigMutation.mutate(e)} className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label htmlFor="enabled">Enable Automatic Cleanup</Label>
+              <p className="text-sm text-muted-foreground">
+                Automatically remove duplicate transcriptions based on schedule
+              </p>
+            </div>
+            <Switch
+              id="enabled"
+              checked={enabled}
+              onCheckedChange={setEnabled}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="schedule">Cleanup Schedule</Label>
+            <Select value={runSchedule} onValueChange={setRunSchedule}>
+              <SelectTrigger id="schedule">
+                <SelectValue placeholder="Select schedule" />
+              </SelectTrigger>
+              <SelectContent>
+                {scheduleOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="retention">Delete Files Older Than (days)</Label>
+            <Input
+              id="retention"
+              type="number"
+              min="1"
+              value={deleteOlderThanDays}
+              onChange={(e) => setDeleteOlderThanDays(parseInt(e.target.value) || 30)}
+            />
             <p className="text-sm text-muted-foreground">
-              Automatically remove duplicate transcriptions based on schedule
+              Only duplicate files older than this many days will be deleted
             </p>
           </div>
-          <Switch
-            id="enabled"
-            checked={enabled}
-            onCheckedChange={setEnabled}
-          />
-        </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="schedule">Cleanup Schedule</Label>
-          <Select value={runSchedule} onValueChange={setRunSchedule}>
-            <SelectTrigger id="schedule">
-              <SelectValue placeholder="Select schedule" />
-            </SelectTrigger>
-            <SelectContent>
-              {scheduleOptions.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="retention">Delete Files Older Than (days)</Label>
-          <Input
-            id="retention"
-            type="number"
-            min="1"
-            value={deleteOlderThanDays}
-            onChange={(e) => setDeleteOlderThanDays(parseInt(e.target.value) || 30)}
-          />
-          <p className="text-sm text-muted-foreground">
-            Only duplicate files older than this many days will be deleted
-          </p>
-        </div>
-
-        <div className="flex items-center justify-between">
-          <div className="space-y-0.5">
-            <Label htmlFor="keep-latest">Keep Latest Version</Label>
-            <p className="text-sm text-muted-foreground">
-              Always keep the most recent duplicate
-            </p>
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label htmlFor="keep-latest">Keep Latest Version</Label>
+              <p className="text-sm text-muted-foreground">
+                Always keep the most recent duplicate
+              </p>
+            </div>
+            <Switch
+              id="keep-latest"
+              checked={keepLatest}
+              onCheckedChange={setKeepLatest}
+            />
           </div>
-          <Switch
-            id="keep-latest"
-            checked={keepLatest}
-            onCheckedChange={setKeepLatest}
-          />
-        </div>
 
-        <Button
-          onClick={() => saveMutation.mutate()}
-          disabled={saveMutation.isPending}
-          className="w-full"
-        >
-          {saveMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Save Configuration
-        </Button>
+          <div className="pt-4 border-t">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <Label className="text-base">Manual Cleanup</Label>
+                <p className="text-sm text-muted-foreground">
+                  Run cleanup now based on current settings
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => runCleanupMutation.mutate()}
+                disabled={runCleanupMutation.isPending || !enabled}
+              >
+                {runCleanupMutation.isPending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Running...
+                  </>
+                ) : (
+                  <>
+                    <Play className="mr-2 h-4 w-4" />
+                    Run Now
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+
+          <Button
+            type="submit"
+            disabled={updateConfigMutation.isPending}
+            className="w-full"
+          >
+            {updateConfigMutation.isPending ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              <>
+                <Database className="mr-2 h-4 w-4" />
+                Save Configuration
+              </>
+            )}
+          </Button>
+        </form>
       </CardContent>
     </Card>
   );
