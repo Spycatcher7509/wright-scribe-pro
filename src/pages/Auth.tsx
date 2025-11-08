@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { logLogin } from "@/lib/activityLogger";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -43,6 +44,9 @@ export default function Auth() {
         }
 
         if (data.user) {
+          // Log successful login
+          await logLogin();
+          
           // Check if user needs to change password
           const { data: profile } = await supabase
             .from("profiles")

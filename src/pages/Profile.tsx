@@ -9,6 +9,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "sonner";
 import { ArrowLeft, Loader2, User, Upload, X, Bell } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { ActivityLogViewer } from "@/components/ActivityLogViewer";
+import { logProfileUpdate } from "@/lib/activityLogger";
 
 const Profile = () => {
   const navigate = useNavigate();
@@ -320,6 +322,8 @@ const Profile = () => {
             </form>
           </CardContent>
         </Card>
+
+        <ActivityLogViewer />
       </div>
     </div>
   );
