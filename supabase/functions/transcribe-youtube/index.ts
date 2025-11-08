@@ -83,43 +83,9 @@ function extractVideoId(url: string): string | null {
   return null;
 }
 
-// Download audio from YouTube using a third-party service
+// Download audio from YouTube using ytdl-core compatible approach
 async function downloadYouTubeAudio(videoId: string): Promise<{ audioBlob: Blob; title: string }> {
-  // Using cobalt.tools API for YouTube audio extraction
-  const cobaltResponse = await fetch("https://api.cobalt.tools/api/json", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Accept": "application/json",
-    },
-    body: JSON.stringify({
-      url: `https://youtube.com/watch?v=${videoId}`,
-      isAudioOnly: true,
-      aFormat: "mp3",
-    }),
-  });
-
-  if (!cobaltResponse.ok) {
-    throw new Error(`Failed to process YouTube URL: ${await cobaltResponse.text()}`);
-  }
-
-  const cobaltData = await cobaltResponse.json();
-  
-  if (cobaltData.status !== "stream" && cobaltData.status !== "redirect") {
-    throw new Error(`Cobalt API error: ${cobaltData.text || "Unknown error"}`);
-  }
-
-  // Download the audio file
-  const audioUrl = cobaltData.url;
-  const audioResponse = await fetch(audioUrl);
-  
-  if (!audioResponse.ok) {
-    throw new Error("Failed to download audio file");
-  }
-
-  const audioBlob = await audioResponse.blob();
-  
-  // Get video title from YouTube
+  // Get video title from YouTube oEmbed API
   const videoInfoResponse = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
   let title = `YouTube Video ${videoId}`;
   
@@ -127,6 +93,70 @@ async function downloadYouTubeAudio(videoId: string): Promise<{ audioBlob: Blob;
     const videoInfo = await videoInfoResponse.json();
     title = videoInfo.title || title;
   }
+
+  // Use a third-party service to download YouTube audio
+  // Option 1: Using y2mate.com API (free alternative)
+  const downloadResponse = await fetch(`https://www.y2mate.com/mates/analyzeV2/ajax`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      k_query: `https://www.youtube.com/watch?v=${videoId}`,
+      k_page: "home",
+      hl: "en",
+      q_auto: "0",
+    }),
+  });
+
+  if (!downloadResponse.ok) {
+    throw new Error(`Failed to analyze YouTube video: ${await downloadResponse.text()}`);
+  }
+
+  const analyzeData = await downloadResponse.json();
+  
+  if (!analyzeData.links || !analyzeData.links.mp3) {
+    throw new Error("No audio format available for this video");
+  }
+
+  // Get the best quality MP3
+  const audioFormats = Object.values(analyzeData.links.mp3) as any[];
+  const bestAudio = audioFormats.find((f: any) => f.q === "128") || audioFormats[0];
+  
+  if (!bestAudio || !bestAudio.k) {
+    throw new Error("Could not find suitable audio format");
+  }
+
+  // Get download link
+  const convertResponse = await fetch(`https://www.y2mate.com/mates/convertV2/index`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      vid: videoId,
+      k: bestAudio.k,
+    }),
+  });
+
+  if (!convertResponse.ok) {
+    throw new Error(`Failed to convert video: ${await convertResponse.text()}`);
+  }
+
+  const convertData = await convertResponse.json();
+  
+  if (!convertData.dlink) {
+    throw new Error("Failed to get download link");
+  }
+
+  // Download the audio file
+  const audioResponse = await fetch(convertData.dlink);
+  
+  if (!audioResponse.ok) {
+    throw new Error("Failed to download audio file");
+  }
+
+  const audioBlob = await audioResponse.blob();
 
   return { audioBlob, title };
 }
