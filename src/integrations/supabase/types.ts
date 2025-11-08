@@ -134,6 +134,33 @@ export type Database = {
         }
         Relationships: []
       }
+      tag_templates: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       tags: {
         Row: {
           category_id: string | null
@@ -168,6 +195,42 @@ export type Database = {
             columns: ["category_id"]
             isOneToOne: false
             referencedRelation: "tag_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      template_tags: {
+        Row: {
+          created_at: string
+          id: string
+          tag_id: string
+          template_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          tag_id: string
+          template_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          tag_id?: string
+          template_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "template_tags_tag_id_fkey"
+            columns: ["tag_id"]
+            isOneToOne: false
+            referencedRelation: "tags"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "template_tags_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "tag_templates"
             referencedColumns: ["id"]
           },
         ]

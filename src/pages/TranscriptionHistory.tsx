@@ -15,6 +15,7 @@ import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Cart
 import { diffWords } from 'diff';
 import TagUsageHeatmap from "@/components/TagUsageHeatmap";
 import TagUsageStatistics from "@/components/TagUsageStatistics";
+import TagTemplatesManager from "@/components/TagTemplatesManager";
 
 // Color palette themes for tags
 const COLOR_THEMES = {
@@ -1172,6 +1173,31 @@ export default function TranscriptionHistory() {
     } else {
       toast.success("Tag removed successfully");
       fetchLogs();
+    }
+  };
+
+  const handleApplyTagsToLog = async (log: TranscriptionLog, tagIds: string[]) => {
+    try {
+      // Insert all tags at once
+      const transcriptionTags = tagIds.map(tagId => ({
+        transcription_id: log.id,
+        tag_id: tagId,
+      }));
+
+      const { error } = await supabase
+        .from("transcription_tags")
+        .insert(transcriptionTags);
+
+      if (error) {
+        console.error("Error applying tags:", error);
+        toast.error("Failed to apply some tags");
+      } else {
+        toast.success(`Applied ${tagIds.length} tag${tagIds.length !== 1 ? 's' : ''} successfully`);
+        fetchLogs();
+      }
+    } catch (error) {
+      console.error("Error applying tags:", error);
+      toast.error("Failed to apply tags");
     }
   };
 
@@ -3029,6 +3055,16 @@ export default function TranscriptionHistory() {
 
           {tagDialogMode === 'manage' ? (
             <div className="space-y-4">
+              {/* Tag Templates Section */}
+              <TagTemplatesManager 
+                tags={tags}
+                onApplyTemplate={(templateTags) => {
+                  if (assignTagsToLog) {
+                    handleApplyTagsToLog(assignTagsToLog, templateTags.map(t => t.id));
+                  }
+                }}
+              />
+
               <div className="flex justify-between items-center">
                 <span className="text-sm text-muted-foreground">
                   {tags.length} tag{tags.length !== 1 ? 's' : ''} • {tagCategories.length} categor{tagCategories.length !== 1 ? 'ies' : 'y'}
