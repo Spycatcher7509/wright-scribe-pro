@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet, Columns3, HelpCircle, Keyboard, BarChart3, Clock, Calendar, GitCompare, Merge, Sliders, Tag, Plus, X, Edit2, Palette, Star, MessageSquare, BarChart2, History, Shield, Copy } from "lucide-react";
+import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet, Columns3, HelpCircle, Keyboard, BarChart3, Clock, Calendar, GitCompare, Merge, Sliders, Tag, Plus, X, Edit2, Palette, Star, MessageSquare, BarChart2, History, Shield, Copy, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO, startOfDay, startOfHour, getHours, getDay, startOfWeek, startOfMonth, subDays, endOfDay } from "date-fns";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -18,6 +18,7 @@ import TagUsageStatistics from "@/components/TagUsageStatistics";
 import TagTemplateManager from "@/components/TagTemplateManager";
 import { PresetAnalytics } from "@/components/PresetAnalytics";
 import { PresetVersionHistory } from "@/components/PresetVersionHistory";
+import { DuplicateDetectionDashboard } from "@/components/DuplicateDetectionDashboard";
 import { cn } from "@/lib/utils";
 
 // Color palette themes for tags
@@ -319,6 +320,7 @@ export default function TranscriptionHistory() {
   const [showChecksumComparison, setShowChecksumComparison] = useState(false);
   const [checksumGroups, setChecksumGroups] = useState<Map<string, TranscriptionLog[]>>(new Map());
   const [selectedChecksumGroup, setSelectedChecksumGroup] = useState<string | null>(null);
+  const [showDuplicateDashboard, setShowDuplicateDashboard] = useState(false);
 
   // Save filter preferences whenever they change
   useEffect(() => {
@@ -2567,11 +2569,14 @@ export default function TranscriptionHistory() {
                   </PopoverContent>
                 </Popover>
 
-                <Button variant="outline" size="sm" onClick={() => setShowAnalytics(false)}>
-                  Hide Analytics
-                </Button>
+                  <Button variant="outline" size="sm" onClick={() => setShowAnalytics(false)}>
+                    Hide Analytics
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setShowDuplicateDashboard(true)}>
+                    Duplicate Detection
+                  </Button>
+                </div>
               </div>
-            </div>
 
             {/* Success Rate Over Time */}
             <Card>
@@ -3057,7 +3062,22 @@ export default function TranscriptionHistory() {
                     </div>
                   </PopoverContent>
                 </Popover>
-                 
+                
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowDuplicateDashboard(true)}
+                  title="Duplicate file detection dashboard"
+                >
+                  <AlertTriangle className="h-4 w-4 mr-2" />
+                  Duplicates
+                  {duplicateFiles.length > 0 && (
+                    <Badge variant="destructive" className="ml-2">
+                      {duplicateFiles.length}
+                    </Badge>
+                  )}
+                </Button>
+
                 <Button
                   variant="outline"
                   size="sm"
@@ -5500,6 +5520,29 @@ export default function TranscriptionHistory() {
                 {duplicateFiles.length} duplicate group{duplicateFiles.length !== 1 ? 's' : ''}
               </div>
               <Button variant="outline" onClick={() => setShowChecksumComparison(false)}>
+                Close
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Duplicate Detection Dashboard Dialog */}
+        <Dialog open={showDuplicateDashboard} onOpenChange={setShowDuplicateDashboard}>
+          <DialogContent className="max-w-7xl max-h-[95vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5" />
+                Duplicate File Detection Dashboard
+              </DialogTitle>
+              <DialogDescription>
+                Manage and remove duplicate files to optimize storage
+              </DialogDescription>
+            </DialogHeader>
+
+            <DuplicateDetectionDashboard logs={logs} onRefresh={fetchLogs} />
+
+            <div className="flex justify-end pt-4 border-t">
+              <Button variant="outline" onClick={() => setShowDuplicateDashboard(false)}>
                 Close
               </Button>
             </div>
