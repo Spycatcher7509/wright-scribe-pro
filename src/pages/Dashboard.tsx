@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { DisclaimerModal } from "@/components/DisclaimerModal";
 import { TranscriptionUpload } from "@/components/TranscriptionUpload";
 import { DuplicateCleanupConfig } from "@/components/DuplicateCleanupConfig";
+import { NotificationBell } from "@/components/NotificationBell";
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -203,6 +204,7 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="flex gap-2">
+            <NotificationBell />
             <Button variant="outline" onClick={() => navigate("/profile")}>
               <User className="mr-2 h-4 w-4" />
               Profile

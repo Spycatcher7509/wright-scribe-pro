@@ -1,4 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -49,6 +50,8 @@ const getActionColor = (actionType: string) => {
 };
 
 export const ActivityLogViewer = () => {
+  const queryClient = useQueryClient();
+
   const { data: activityLogs, isLoading } = useQuery({
     queryKey: ["activity-logs"],
     queryFn: async () => {
@@ -66,6 +69,40 @@ export const ActivityLogViewer = () => {
       return data as ActivityLog[];
     },
   });
+
+  // Subscribe to real-time updates
+  useEffect(() => {
+    let userId: string | null = null;
+
+    const initRealtime = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      userId = user.id;
+
+      const channel = supabase
+        .channel('activity-logs-viewer')
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'activity_logs',
+            filter: `user_id=eq.${userId}`,
+          },
+          () => {
+            // Invalidate and refetch activity logs
+            queryClient.invalidateQueries({ queryKey: ["activity-logs"] });
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    };
+
+    initRealtime();
+  }, [queryClient]);
 
   return (
     <Card>
