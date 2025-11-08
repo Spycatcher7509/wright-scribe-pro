@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet, Columns3, HelpCircle, Keyboard, BarChart3, Clock, Calendar, GitCompare, Merge, Sliders, Tag, Plus, X, Edit2, Palette } from "lucide-react";
+import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet, Columns3, HelpCircle, Keyboard, BarChart3, Clock, Calendar, GitCompare, Merge, Sliders, Tag, Plus, X, Edit2, Palette, Star, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO, startOfDay, startOfHour, getHours, getDay, startOfWeek, startOfMonth, subDays, endOfDay } from "date-fns";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -145,6 +145,21 @@ interface FilterPreset {
   profiles?: {
     email: string;
   };
+  avg_rating?: number;
+  rating_count?: number;
+  user_rating?: number;
+}
+
+interface PresetComment {
+  id: string;
+  user_id: string;
+  preset_id: string;
+  comment: string;
+  created_at: string;
+  updated_at: string;
+  profiles?: {
+    email: string;
+  };
 }
 
 type SortField = 'file_title' | 'status' | 'created_at';
@@ -268,6 +283,9 @@ export default function TranscriptionHistory() {
   const [showMarketplace, setShowMarketplace] = useState(false);
   const [sharedPresets, setSharedPresets] = useState<FilterPreset[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [selectedPresetForComments, setSelectedPresetForComments] = useState<FilterPreset | null>(null);
+  const [presetComments, setPresetComments] = useState<PresetComment[]>([]);
+  const [newComment, setNewComment] = useState('');
 
   // Save filter preferences whenever they change
   useEffect(() => {
@@ -528,7 +546,30 @@ export default function TranscriptionHistory() {
       }
 
       if (data) {
-        setSharedPresets(data as any);
+        // Fetch ratings for each preset
+        const presetsWithRatings = await Promise.all(
+          data.map(async (preset) => {
+            const { data: ratings } = await supabase
+              .from('preset_ratings')
+              .select('rating, user_id')
+              .eq('preset_id', preset.id);
+
+            const avgRating = ratings && ratings.length > 0
+              ? ratings.reduce((sum, r) => sum + r.rating, 0) / ratings.length
+              : 0;
+
+            const userRating = ratings?.find(r => r.user_id === currentUser?.id)?.rating;
+
+            return {
+              ...preset,
+              avg_rating: avgRating,
+              rating_count: ratings?.length || 0,
+              user_rating: userRating,
+            };
+          })
+        );
+
+        setSharedPresets(presetsWithRatings as any);
       }
     };
 
@@ -850,6 +891,141 @@ export default function TranscriptionHistory() {
     }
 
     toast.success(`Cloned "${preset.name}" to your presets`);
+  };
+
+  // Rate a preset
+  const handleRatePreset = async (presetId: string, rating: number) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      toast.error('You must be logged in to rate presets');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('preset_ratings')
+      .upsert({
+        user_id: user.id,
+        preset_id: presetId,
+        rating: rating,
+      }, {
+        onConflict: 'user_id,preset_id'
+      });
+
+    if (error) {
+      console.error('Error rating preset:', error);
+      toast.error('Failed to rate preset');
+      return;
+    }
+
+    toast.success(`Rated ${rating} star${rating !== 1 ? 's' : ''}`);
+    
+    // Refresh shared presets to show updated rating
+    const currentUser = (await supabase.auth.getUser()).data.user;
+    const { data } = await supabase
+      .from('filter_presets')
+      .select(`
+        *,
+        profiles!inner(email)
+      `)
+      .eq('is_shared', true)
+      .neq('user_id', currentUser?.id || '')
+      .order('created_at', { ascending: false });
+
+    if (data) {
+      const presetsWithRatings = await Promise.all(
+        data.map(async (preset) => {
+          const { data: ratings } = await supabase
+            .from('preset_ratings')
+            .select('rating, user_id')
+            .eq('preset_id', preset.id);
+
+          const avgRating = ratings && ratings.length > 0
+            ? ratings.reduce((sum, r) => sum + r.rating, 0) / ratings.length
+            : 0;
+
+          const userRating = ratings?.find(r => r.user_id === currentUser?.id)?.rating;
+
+          return {
+            ...preset,
+            avg_rating: avgRating,
+            rating_count: ratings?.length || 0,
+            user_rating: userRating,
+          };
+        })
+      );
+
+      setSharedPresets(presetsWithRatings as any);
+    }
+  };
+
+  // Fetch comments for a preset
+  const fetchPresetComments = async (presetId: string) => {
+    const { data, error } = await supabase
+      .from('preset_comments')
+      .select(`
+        *,
+        profiles!inner(email)
+      `)
+      .eq('preset_id', presetId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching comments:', error);
+      return;
+    }
+
+    if (data) {
+      setPresetComments(data as any);
+    }
+  };
+
+  // Add a comment
+  const handleAddComment = async (presetId: string) => {
+    if (!newComment.trim()) {
+      toast.error('Please enter a comment');
+      return;
+    }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      toast.error('You must be logged in to comment');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('preset_comments')
+      .insert({
+        user_id: user.id,
+        preset_id: presetId,
+        comment: newComment,
+      });
+
+    if (error) {
+      console.error('Error adding comment:', error);
+      toast.error('Failed to add comment');
+      return;
+    }
+
+    setNewComment('');
+    toast.success('Comment added');
+    fetchPresetComments(presetId);
+  };
+
+  // Delete a comment
+  const handleDeleteComment = async (commentId: string, presetId: string) => {
+    const { error } = await supabase
+      .from('preset_comments')
+      .delete()
+      .eq('id', commentId);
+
+    if (error) {
+      console.error('Error deleting comment:', error);
+      toast.error('Failed to delete comment');
+      return;
+    }
+
+    toast.success('Comment deleted');
+    fetchPresetComments(presetId);
   };
 
   useEffect(() => {
@@ -4650,92 +4826,216 @@ export default function TranscriptionHistory() {
                   <Card key={preset.id} className="hover:shadow-md transition-shadow">
                     <CardContent className="p-4">
                       <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-2">
-                            <h3 className="font-semibold text-base truncate">{preset.name}</h3>
-                            <Badge variant="outline" className="text-xs">Shared</Badge>
-                          </div>
-                          
-                          {preset.description && (
-                            <p className="text-sm text-muted-foreground mb-3">
-                              {preset.description}
-                            </p>
-                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-2">
+                              <h3 className="font-semibold text-base truncate">{preset.name}</h3>
+                              <Badge variant="outline" className="text-xs">Shared</Badge>
+                              
+                              {/* Rating Display */}
+                              {preset.avg_rating !== undefined && preset.avg_rating > 0 && (
+                                <div className="flex items-center gap-1 text-sm">
+                                  <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+                                  <span className="font-medium">{preset.avg_rating.toFixed(1)}</span>
+                                  <span className="text-muted-foreground text-xs">({preset.rating_count})</span>
+                                </div>
+                              )}
+                            </div>
+                            
+                            {preset.description && (
+                              <p className="text-sm text-muted-foreground mb-3">
+                                {preset.description}
+                              </p>
+                            )}
 
-                          <div className="flex flex-wrap gap-2 mb-3">
-                            {preset.filter_data.searchQuery && (
-                              <Badge variant="secondary" className="text-xs">
-                                Search: {preset.filter_data.searchQuery}
-                              </Badge>
-                            )}
-                            {preset.filter_data.selectedStatuses && preset.filter_data.selectedStatuses.length > 0 && (
-                              <Badge variant="secondary" className="text-xs">
-                                {preset.filter_data.selectedStatuses.length} status filter(s)
-                              </Badge>
-                            )}
-                            {preset.filter_data.selectedTagFilters && preset.filter_data.selectedTagFilters.length > 0 && (
-                              <Badge variant="secondary" className="text-xs">
-                                {preset.filter_data.selectedTagFilters.length} tag filter(s)
-                              </Badge>
-                            )}
-                            {(preset.filter_data.startDate || preset.filter_data.endDate) && (
-                              <Badge variant="secondary" className="text-xs">
-                                Date range filter
-                              </Badge>
-                            )}
-                            {preset.filter_data.lengthRange && 
-                             (preset.filter_data.lengthRange[0] !== 0 || preset.filter_data.lengthRange[1] !== 50000) && (
-                              <Badge variant="secondary" className="text-xs">
-                                Length filter
-                              </Badge>
-                            )}
+                            {/* User Rating */}
+                            <div className="flex items-center gap-1 mb-3">
+                              <span className="text-xs text-muted-foreground mr-1">Your rating:</span>
+                              {[1, 2, 3, 4, 5].map((star) => (
+                                <button
+                                  key={star}
+                                  onClick={() => handleRatePreset(preset.id, star)}
+                                  className="transition-all hover:scale-110"
+                                  title={`Rate ${star} star${star !== 1 ? 's' : ''}`}
+                                >
+                                  <Star
+                                    className={`h-4 w-4 ${
+                                      preset.user_rating && star <= preset.user_rating
+                                        ? 'fill-yellow-400 text-yellow-400'
+                                        : 'text-muted-foreground'
+                                    }`}
+                                  />
+                                </button>
+                              ))}
+                            </div>
+
+                            <div className="flex flex-wrap gap-2 mb-3">
+                              {preset.filter_data.searchQuery && (
+                                <Badge variant="secondary" className="text-xs">
+                                  Search: {preset.filter_data.searchQuery}
+                                </Badge>
+                              )}
+                              {preset.filter_data.selectedStatuses && preset.filter_data.selectedStatuses.length > 0 && (
+                                <Badge variant="secondary" className="text-xs">
+                                  {preset.filter_data.selectedStatuses.length} status filter(s)
+                                </Badge>
+                              )}
+                              {preset.filter_data.selectedTagFilters && preset.filter_data.selectedTagFilters.length > 0 && (
+                                <Badge variant="secondary" className="text-xs">
+                                  {preset.filter_data.selectedTagFilters.length} tag filter(s)
+                                </Badge>
+                              )}
+                              {(preset.filter_data.startDate || preset.filter_data.endDate) && (
+                                <Badge variant="secondary" className="text-xs">
+                                  Date range filter
+                                </Badge>
+                              )}
+                              {preset.filter_data.lengthRange && 
+                               (preset.filter_data.lengthRange[0] !== 0 || preset.filter_data.lengthRange[1] !== 50000) && (
+                                <Badge variant="secondary" className="text-xs">
+                                  Length filter
+                                </Badge>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <span>Shared by: {preset.profiles?.email || 'Unknown'}</span>
+                              <span>•</span>
+                              <span>{format(new Date(preset.created_at), 'MMM d, yyyy')}</span>
+                            </div>
                           </div>
 
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <span>Shared by: {preset.profiles?.email || 'Unknown'}</span>
-                            <span>•</span>
-                            <span>{format(new Date(preset.created_at), 'MMM d, yyyy')}</span>
+                          <div className="flex flex-col gap-2">
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                handleClonePreset(preset);
+                                setShowMarketplace(false);
+                              }}
+                            >
+                              <Download className="h-4 w-4 mr-2" />
+                              Clone
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                handleLoadPreset(preset);
+                                setShowMarketplace(false);
+                              }}
+                            >
+                              <Eye className="h-4 w-4 mr-2" />
+                              Preview
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedPresetForComments(preset);
+                                fetchPresetComments(preset.id);
+                              }}
+                            >
+                              <MessageSquare className="h-4 w-4 mr-2" />
+                              Comments
+                            </Button>
                           </div>
                         </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </div>
 
-                        <div className="flex flex-col gap-2">
-                          <Button
-                            size="sm"
-                            onClick={() => {
-                              handleClonePreset(preset);
-                              setShowMarketplace(false);
-                            }}
-                          >
-                            <Download className="h-4 w-4 mr-2" />
-                            Clone
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              handleLoadPreset(preset);
-                              setShowMarketplace(false);
-                            }}
-                          >
-                            <Eye className="h-4 w-4 mr-2" />
-                            Preview
-                          </Button>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+            <div className="flex justify-end pt-4 border-t">
+              <Button variant="outline" onClick={() => setShowMarketplace(false)}>
+                Close
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Comments Dialog */}
+        <Dialog open={!!selectedPresetForComments} onOpenChange={(open) => !open && setSelectedPresetForComments(null)}>
+          <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+            <DialogHeader>
+              <DialogTitle>Comments: {selectedPresetForComments?.name}</DialogTitle>
+              <DialogDescription>
+                Share your thoughts and feedback about this preset
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="flex-1 overflow-y-auto space-y-4">
+              {/* Add Comment */}
+              <div className="space-y-2 pb-4 border-b">
+                <Label htmlFor="new-comment">Add a comment</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="new-comment"
+                    placeholder="Share your thoughts..."
+                    value={newComment}
+                    onChange={(e) => setNewComment(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey && selectedPresetForComments) {
+                        e.preventDefault();
+                        handleAddComment(selectedPresetForComments.id);
+                      }
+                    }}
+                  />
+                  <Button 
+                    onClick={() => selectedPresetForComments && handleAddComment(selectedPresetForComments.id)}
+                    disabled={!newComment.trim()}
+                  >
+                    Post
+                  </Button>
+                </div>
               </div>
-            )}
-          </div>
 
-          <div className="flex justify-end pt-4 border-t">
-            <Button variant="outline" onClick={() => setShowMarketplace(false)}>
-              Close
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-}
+              {/* Comments List */}
+              {presetComments.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <MessageSquare className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                  <p>No comments yet. Be the first to share your thoughts!</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {presetComments.map((comment) => (
+                    <div key={comment.id} className="p-3 border rounded-lg bg-muted/20">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-sm font-medium">
+                              {comment.profiles?.email || 'Unknown'}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {format(new Date(comment.created_at), 'MMM d, yyyy HH:mm')}
+                            </span>
+                          </div>
+                          <p className="text-sm">{comment.comment}</p>
+                        </div>
+                        {comment.user_id === currentUserId && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0"
+                            onClick={() => selectedPresetForComments && handleDeleteComment(comment.id, selectedPresetForComments.id)}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end pt-4 border-t">
+              <Button variant="outline" onClick={() => setSelectedPresetForComments(null)}>
+                Close
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+    );
+  }
