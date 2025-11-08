@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlertDialog,
@@ -16,7 +17,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Loader2, FileText, Check, X, Shield, ShieldOff, Trash2, Keyboard } from "lucide-react";
+import { Loader2, FileText, Check, X, Shield, ShieldOff, Trash2, Keyboard, Search } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
@@ -47,6 +48,7 @@ export function DuplicateCleanupPreview({
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showKeyboardHints, setShowKeyboardHints] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const { data: duplicates, isLoading } = useQuery({
     queryKey: ["cleanup-preview", keepLatest, deleteOlderThanDays],
     queryFn: async () => {
@@ -128,12 +130,27 @@ export function DuplicateCleanupPreview({
     enabled,
   });
 
-  const totalToDelete = duplicates?.reduce(
+  // Filter duplicates based on search query
+  const filteredDuplicates = duplicates?.filter(group => {
+    if (!searchQuery.trim()) return true;
+    
+    const query = searchQuery.toLowerCase();
+    return group.files.some(file => 
+      file.file_title.toLowerCase().includes(query)
+    );
+  }).map(group => ({
+    ...group,
+    files: group.files.filter(file =>
+      file.file_title.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+  }));
+
+  const totalToDelete = filteredDuplicates?.reduce(
     (sum, group) => sum + group.files.filter(f => f.willBeDeleted).length,
     0
   ) || 0;
 
-  const totalProtected = duplicates?.reduce(
+  const totalProtected = filteredDuplicates?.reduce(
     (sum, group) => sum + group.files.filter(f => f.is_protected).length,
     0
   ) || 0;
@@ -203,9 +220,9 @@ export function DuplicateCleanupPreview({
   };
 
   const selectAll = () => {
-    if (!duplicates) return;
+    if (!filteredDuplicates) return;
     const allFiles = new Set<string>();
-    duplicates.forEach(group => {
+    filteredDuplicates.forEach(group => {
       group.files.forEach(file => allFiles.add(file.id));
     });
     setSelectedFiles(allFiles);
@@ -256,7 +273,7 @@ export function DuplicateCleanupPreview({
 
   // Keyboard shortcuts
   useEffect(() => {
-    if (!enabled || !duplicates || duplicates.length === 0) return;
+    if (!enabled || !filteredDuplicates || filteredDuplicates.length === 0) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ctrl+A / Cmd+A - Select all
@@ -292,7 +309,7 @@ export function DuplicateCleanupPreview({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [enabled, duplicates, selectedFiles, showKeyboardHints]);
+  }, [enabled, filteredDuplicates, selectedFiles, showKeyboardHints]);
 
   if (isLoading) {
     return (
@@ -403,10 +420,35 @@ export function DuplicateCleanupPreview({
         )}
       </CardHeader>
       <CardContent>
+        <div className="mb-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search files by name..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+        </div>
+
         {!duplicates || duplicates.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
             <FileText className="h-12 w-12 mx-auto mb-3 opacity-50" />
             <p>No duplicate files found</p>
+          </div>
+        ) : !filteredDuplicates || filteredDuplicates.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            <Search className="h-12 w-12 mx-auto mb-3 opacity-50" />
+            <p>No files match your search</p>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={() => setSearchQuery("")}
+              className="mt-2"
+            >
+              Clear search
+            </Button>
           </div>
         ) : (
           <ScrollArea className="h-[400px] pr-4">
@@ -416,7 +458,7 @@ export function DuplicateCleanupPreview({
                   size="sm"
                   variant="outline"
                   onClick={selectAll}
-                  disabled={!duplicates || duplicates.length === 0}
+                  disabled={!filteredDuplicates || filteredDuplicates.length === 0}
                 >
                   Select All
                 </Button>
@@ -432,7 +474,7 @@ export function DuplicateCleanupPreview({
             </div>
             
             <div className="space-y-4">
-              {duplicates.map((group, groupIndex) => (
+              {filteredDuplicates.map((group, groupIndex) => (
                 <div 
                   key={group.checksum} 
                   className="border border-border rounded-lg p-4 space-y-2"
