@@ -9,8 +9,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "sonner";
-import { Upload, FileAudio, Loader2, Youtube, AlertTriangle } from "lucide-react";
+import { Upload, FileAudio, Loader2, Youtube, AlertTriangle, Shield, Eye, History, CheckCircle2, XCircle } from "lucide-react";
 import { calculateFileChecksum } from "@/lib/checksumUtils";
+import { format } from "date-fns";
 
 interface TranscriptionResult {
   text: string;
@@ -23,10 +24,16 @@ interface TranscriptionResult {
 export function TranscriptionUpload() {
   const [file, setFile] = useState<File | null>(null);
   const [fileChecksum, setFileChecksum] = useState<string>("");
-  const [duplicateWarning, setDuplicateWarning] = useState<{ exists: boolean; log?: any } | null>(null);
+  const [duplicateWarning, setDuplicateWarning] = useState<{ 
+    exists: boolean; 
+    logs?: any[];
+    totalVersions?: number;
+  } | null>(null);
+  const [proceedWithDuplicate, setProceedWithDuplicate] = useState(false);
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [downloadVideo, setDownloadVideo] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isValidating, setIsValidating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<TranscriptionResult | null>(null);
   const [mode, setMode] = useState<'transcribe' | 'translate'>('transcribe');
@@ -53,37 +60,63 @@ export function TranscriptionUpload() {
       setFile(selectedFile);
       setResult(null);
       setDuplicateWarning(null);
+      setProceedWithDuplicate(false);
+      setIsValidating(true);
 
       // Calculate checksum
       try {
-        toast.info("Calculating file checksum...");
+        toast.info("Validating file integrity...");
         const checksum = await calculateFileChecksum(selectedFile);
         setFileChecksum(checksum);
 
         // Check if file already exists
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
-          const { data: existingLogs } = await supabase
+          const { data: existingLogs, error: fetchError } = await supabase
             .from('transcription_logs')
             .select('*')
             .eq('file_checksum', checksum)
             .eq('user_id', user.id)
-            .order('created_at', { ascending: false })
-            .limit(1);
+            .order('created_at', { ascending: false });
 
-          if (existingLogs && existingLogs.length > 0) {
+          if (fetchError) {
+            console.error("Error checking for duplicates:", fetchError);
+            toast.error("Failed to check for duplicates");
+          } else if (existingLogs && existingLogs.length > 0) {
+            const completedLogs = existingLogs.filter(log => log.status === 'completed');
             setDuplicateWarning({
               exists: true,
-              log: existingLogs[0]
+              logs: existingLogs,
+              totalVersions: existingLogs.length
             });
-            toast.warning("This file has been processed before");
+            
+            if (completedLogs.length > 0) {
+              toast.warning(
+                `Duplicate detected! This file has ${existingLogs.length} existing version${existingLogs.length !== 1 ? 's' : ''}`,
+                {
+                  duration: 5000,
+                }
+              );
+            } else {
+              toast.warning(
+                `File previously uploaded but processing failed. You can try again.`,
+                {
+                  duration: 4000,
+                }
+              );
+            }
           } else {
-            toast.success("File validated - no duplicates found");
+            setFileChecksum(checksum);
+            toast.success("File validated - no duplicates found", {
+              icon: <Shield className="h-4 w-4" />,
+            });
           }
         }
       } catch (error) {
         console.error("Error calculating checksum:", error);
         toast.error("Failed to calculate file checksum");
+      } finally {
+        setIsValidating(false);
       }
     }
   };
@@ -92,6 +125,15 @@ export function TranscriptionUpload() {
     if (!file) {
       toast.error("Please select a file first");
       return;
+    }
+
+    // Check if duplicate exists and user hasn't acknowledged
+    if (duplicateWarning?.exists && !proceedWithDuplicate) {
+      const hasCompleted = duplicateWarning.logs?.some(log => log.status === 'completed');
+      if (hasCompleted) {
+        toast.error("Please acknowledge the duplicate warning before proceeding");
+        return;
+      }
     }
 
     setIsProcessing(true);
@@ -212,10 +254,22 @@ export function TranscriptionUpload() {
     setFile(null);
     setFileChecksum("");
     setDuplicateWarning(null);
+    setProceedWithDuplicate(false);
     setYoutubeUrl("");
     setResult(null);
     setProgress(0);
     setMode('transcribe');
+  };
+
+  const handleUseCachedResult = (log: any) => {
+    if (log.transcription_text) {
+      setResult({
+        text: log.transcription_text,
+        logId: log.id,
+        language: 'cached'
+      });
+      toast.success("Loaded cached transcription result");
+    }
   };
 
   return (
@@ -269,21 +323,104 @@ export function TranscriptionUpload() {
                   </div>
                 </div>
 
-                {duplicateWarning?.exists && (
-                  <Alert variant="destructive">
+                {isValidating && (
+                  <Alert>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <AlertDescription>
+                      Validating file and checking for duplicates...
+                    </AlertDescription>
+                  </Alert>
+                )}
+
+                {duplicateWarning?.exists && !isValidating && (
+                  <Alert variant="destructive" className="border-2">
                     <AlertTriangle className="h-4 w-4" />
                     <AlertDescription>
-                      <strong>Duplicate file detected!</strong>
-                      <p className="text-sm mt-1">
-                        This file was already processed on{' '}
-                        {new Date(duplicateWarning.log.created_at).toLocaleString()}.
-                        Status: {duplicateWarning.log.status}
-                      </p>
-                      {duplicateWarning.log.status === 'completed' && (
-                        <p className="text-sm mt-1">
-                          You can view the previous result in your transcription history.
-                        </p>
-                      )}
+                      <div className="space-y-3">
+                        <div>
+                          <strong className="text-base">⚠️ Duplicate File Detected</strong>
+                          <p className="text-sm mt-1">
+                            This file has been processed <strong>{duplicateWarning.totalVersions}</strong> time{duplicateWarning.totalVersions !== 1 ? 's' : ''} before.
+                          </p>
+                        </div>
+
+                        {duplicateWarning.logs && duplicateWarning.logs.length > 0 && (
+                          <div className="space-y-2">
+                            <p className="text-sm font-medium">Previous Versions:</p>
+                            <div className="space-y-2 max-h-40 overflow-y-auto">
+                              {duplicateWarning.logs.slice(0, 3).map((log, index) => (
+                                <div key={log.id} className="bg-background/50 p-2 rounded-md text-xs space-y-1">
+                                  <div className="flex items-center justify-between">
+                                    <span className="font-medium">
+                                      Version {duplicateWarning.totalVersions! - index}
+                                      {index === 0 && " (Latest)"}
+                                    </span>
+                                    <div className="flex items-center gap-1">
+                                      {log.status === 'completed' && (
+                                        <CheckCircle2 className="h-3 w-3 text-green-600" />
+                                      )}
+                                      {log.status === 'failed' && (
+                                        <XCircle className="h-3 w-3 text-red-600" />
+                                      )}
+                                      <span className="capitalize">{log.status}</span>
+                                    </div>
+                                  </div>
+                                  <div className="text-muted-foreground">
+                                    {format(new Date(log.created_at), 'MMM dd, yyyy HH:mm')}
+                                  </div>
+                                  {log.status === 'completed' && log.transcription_text && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-6 text-xs mt-1"
+                                      onClick={() => handleUseCachedResult(log)}
+                                    >
+                                      <Eye className="h-3 w-3 mr-1" />
+                                      Use This Result
+                                    </Button>
+                                  )}
+                                </div>
+                              ))}
+                              {duplicateWarning.totalVersions! > 3 && (
+                                <p className="text-xs text-muted-foreground text-center">
+                                  + {duplicateWarning.totalVersions! - 3} more version{duplicateWarning.totalVersions! - 3 !== 1 ? 's' : ''}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {duplicateWarning.logs?.some(log => log.status === 'completed') && (
+                          <div className="space-y-2 pt-2 border-t">
+                            <p className="text-sm font-medium">Options:</p>
+                            <div className="flex items-start gap-2">
+                              <Checkbox
+                                id="proceed-duplicate"
+                                checked={proceedWithDuplicate}
+                                onCheckedChange={(checked) => setProceedWithDuplicate(checked as boolean)}
+                              />
+                              <div className="grid gap-1.5 leading-none">
+                                <label
+                                  htmlFor="proceed-duplicate"
+                                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                                >
+                                  I understand this is a duplicate and want to process it anyway
+                                </label>
+                                <p className="text-xs text-muted-foreground">
+                                  This will create another version and consume API credits
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-2 text-xs">
+                          <Shield className="h-3 w-3" />
+                          <span className="text-muted-foreground">
+                            Checksum: <code className="bg-background px-1 py-0.5 rounded">{fileChecksum.substring(0, 16)}...</code>
+                          </span>
+                        </div>
+                      </div>
                     </AlertDescription>
                   </Alert>
                 )}
@@ -331,7 +468,14 @@ export function TranscriptionUpload() {
 
               <Button
                 onClick={handleTranscribe}
-                disabled={!file || isProcessing}
+                disabled={
+                  !file || 
+                  isProcessing || 
+                  isValidating ||
+                  (duplicateWarning?.exists && 
+                   duplicateWarning.logs?.some(log => log.status === 'completed') && 
+                   !proceedWithDuplicate)
+                }
                 className="w-full"
               >
                 {isProcessing ? (
@@ -339,10 +483,19 @@ export function TranscriptionUpload() {
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     {mode === 'translate' ? 'Translating...' : 'Transcribing...'}
                   </>
+                ) : isValidating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Validating...
+                  </>
                 ) : (
                   <>
                     <Upload className="mr-2 h-4 w-4" />
+                    {duplicateWarning?.exists && proceedWithDuplicate && (
+                      <History className="mr-2 h-4 w-4" />
+                    )}
                     {mode === 'translate' ? 'Translate Audio' : 'Transcribe Audio'}
+                    {duplicateWarning?.exists && proceedWithDuplicate && ' (New Version)'}
                   </>
                 )}
               </Button>
