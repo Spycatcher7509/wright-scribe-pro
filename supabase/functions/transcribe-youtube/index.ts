@@ -457,7 +457,21 @@ serve(async (req: Request) => {
     console.log(`Processing YouTube transcription for user ${user.id}, video: ${videoId}, language: ${requestedLanguage}`);
 
     // Get transcript or audio
-    const content = await getYouTubeContent(videoId, requestedLanguage);
+    let content;
+    try {
+      content = await getYouTubeContent(videoId, requestedLanguage);
+    } catch (contentError: any) {
+      console.error("Failed to get YouTube content:", contentError);
+      
+      // Return a more helpful error message
+      return new Response(
+        JSON.stringify({ 
+          error: contentError.message || "Failed to process video",
+          suggestion: "Please ensure the video has captions/subtitles enabled, or try a different video."
+        }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     // Create transcription log entry
     const { data: logEntry, error: logError } = await supabase

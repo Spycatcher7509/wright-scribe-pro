@@ -353,6 +353,18 @@ export function TranscriptionUpload() {
       return;
     }
 
+    // Block transcription if captions aren't available
+    if (captionStatus.available === false) {
+      toast.error("This video doesn't have captions. Please try a different video.");
+      return;
+    }
+
+    // Warn if caption status is unknown
+    if (captionStatus.available === null && !captionStatus.checking) {
+      toast.error("Please wait for caption availability check to complete");
+      return;
+    }
+
     const maxRetries = 3;
     let attempt = 0;
     let lastError: any = null;
@@ -858,13 +870,23 @@ export function TranscriptionUpload() {
 
               <Button
                 onClick={handleYoutubeTranscribe}
-                disabled={!youtubeUrl.trim() || isProcessing}
+                disabled={
+                  !youtubeUrl.trim() || 
+                  isProcessing || 
+                  captionStatus.checking ||
+                  captionStatus.available === false
+                }
                 className="w-full"
               >
                 {isProcessing ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Processing...
+                  </>
+                ) : captionStatus.available === false ? (
+                  <>
+                    <AlertTriangle className="mr-2 h-4 w-4" />
+                    No Captions Available
                   </>
                 ) : (
                   <>
@@ -873,6 +895,12 @@ export function TranscriptionUpload() {
                   </>
                 )}
               </Button>
+              
+              {captionStatus.available === false && youtubeUrl.trim() && (
+                <p className="text-xs text-muted-foreground text-center">
+                  This video doesn't have captions. Please try a different video with captions/subtitles enabled.
+                </p>
+              )}
             </TabsContent>
           </Tabs>
         </CardContent>
