@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet, Columns3, HelpCircle, Keyboard, BarChart3, Clock, Calendar, GitCompare, Merge, Sliders } from "lucide-react";
+import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet, Columns3, HelpCircle, Keyboard, BarChart3, Clock, Calendar, GitCompare, Merge, Sliders, Tag, Plus, X, Edit2 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO, startOfDay, startOfHour, getHours, getDay, startOfWeek, startOfMonth, subDays, endOfDay } from "date-fns";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -61,6 +61,16 @@ interface TranscriptionLog {
   error_message?: string;
   log_time: string;
   transcription_text?: string;
+  tags?: Tag[];
+}
+
+interface Tag {
+  id: string;
+  name: string;
+  color: string;
+  user_id: string;
+  created_at: string;
+  updated_at: string;
 }
 
 type SortField = 'file_title' | 'status' | 'created_at';
@@ -151,6 +161,14 @@ export default function TranscriptionHistory() {
   const [showCompareDialog, setShowCompareDialog] = useState(false);
   const [lengthRange, setLengthRange] = useState<[number, number]>(savedPrefs.lengthRange || [0, 50000]);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(savedPrefs.showAdvancedFilters || false);
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [selectedTagIds, setSelectedTagIds] = useState<Set<string>>(new Set());
+  const [showTagDialog, setShowTagDialog] = useState(false);
+  const [tagDialogMode, setTagDialogMode] = useState<'create' | 'edit' | 'manage'>('create');
+  const [editingTag, setEditingTag] = useState<Tag | null>(null);
+  const [newTagName, setNewTagName] = useState('');
+  const [newTagColor, setNewTagColor] = useState('#3b82f6');
+  const [assignTagsToLog, setAssignTagsToLog] = useState<TranscriptionLog | null>(null);
 
   // Save filter preferences whenever they change
   useEffect(() => {

@@ -107,6 +107,33 @@ export type Database = {
         }
         Relationships: []
       }
+      tags: {
+        Row: {
+          color: string | null
+          created_at: string
+          id: string
+          name: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          color?: string | null
+          created_at?: string
+          id?: string
+          name: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          color?: string | null
+          created_at?: string
+          id?: string
+          name?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       transcription_logs: {
         Row: {
           created_at: string
@@ -145,6 +172,42 @@ export type Database = {
           user_id?: string | null
         }
         Relationships: []
+      }
+      transcription_tags: {
+        Row: {
+          created_at: string
+          id: string
+          tag_id: string
+          transcription_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          tag_id: string
+          transcription_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          tag_id?: string
+          transcription_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "transcription_tags_tag_id_fkey"
+            columns: ["tag_id"]
+            isOneToOne: false
+            referencedRelation: "tags"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "transcription_tags_transcription_id_fkey"
+            columns: ["transcription_id"]
+            isOneToOne: false
+            referencedRelation: "transcription_logs"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_roles: {
         Row: {
