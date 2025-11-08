@@ -30,7 +30,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Loader2, FileText, Check, X, Shield, ShieldOff, Trash2, Keyboard, Search, Filter, CalendarIcon, Save, Star, StarOff, Download, Upload, FolderDown } from "lucide-react";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Loader2, FileText, Check, X, Shield, ShieldOff, Trash2, Keyboard, Search, Filter, CalendarIcon, Save, Star, StarOff, Download, Upload, FolderDown, AlertTriangle } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { toast } from "sonner";
 
@@ -70,6 +71,9 @@ export function DuplicateCleanupPreview({
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [isBulkExporting, setIsBulkExporting] = useState(false);
+  const [showConflictDialog, setShowConflictDialog] = useState(false);
+  const [conflictingPresets, setConflictingPresets] = useState<any[]>([]);
+  const [conflictResolution, setConflictResolution] = useState<"skip" | "rename" | "overwrite">("rename");
   // Fetch filter presets
   const { data: filterPresets } = useQuery({
     queryKey: ["cleanup-filter-presets"],
@@ -484,11 +488,111 @@ export function DuplicateCleanupPreview({
           throw new Error("Invalid preset file format");
         }
 
-        importPresetMutation.mutate(presetData);
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error("Not authenticated");
+
+        // Check for conflict
+        const conflicts = await checkForConflicts([{
+          user_id: user.id,
+          name: presetData.name,
+          description: presetData.description || null,
+          filter_data: presetData.filter_data,
+        }]);
+
+        if (conflicts.length > 0) {
+          // Show conflict resolution dialog
+          setConflictingPresets([{
+            user_id: user.id,
+            name: presetData.name,
+            description: presetData.description || null,
+            filter_data: presetData.filter_data,
+          }]);
+          setShowConflictDialog(true);
+        } else {
+          importPresetMutation.mutate(presetData);
+        }
       }
     } catch (error: any) {
       toast.error("Failed to parse preset file: " + error.message);
     }
+  };
+
+  const checkForConflicts = async (presetsToImport: any[]) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error("Not authenticated");
+
+    const { data: existingPresets, error } = await supabase
+      .from("filter_presets")
+      .select("name")
+      .eq("user_id", user.id);
+
+    if (error) throw error;
+
+    const existingNames = new Set(existingPresets?.map(p => p.name) || []);
+    const conflicts = presetsToImport.filter(p => existingNames.has(p.name));
+
+    return conflicts;
+  };
+
+  const resolveConflicts = async (presetsToImport: any[], resolution: "skip" | "rename" | "overwrite") => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error("Not authenticated");
+
+    const { data: existingPresets } = await supabase
+      .from("filter_presets")
+      .select("name, id")
+      .eq("user_id", user.id);
+
+    const existingNames = new Map(existingPresets?.map(p => [p.name, p.id]) || []);
+    const presetsToInsert: any[] = [];
+    const presetsToUpdate: any[] = [];
+    let skippedCount = 0;
+
+    for (const preset of presetsToImport) {
+      if (existingNames.has(preset.name)) {
+        if (resolution === "skip") {
+          skippedCount++;
+        } else if (resolution === "rename") {
+          // Find a unique name
+          let counter = 1;
+          let newName = `${preset.name} (${counter})`;
+          while (existingNames.has(newName) || presetsToInsert.some(p => p.name === newName)) {
+            counter++;
+            newName = `${preset.name} (${counter})`;
+          }
+          presetsToInsert.push({ ...preset, name: newName });
+        } else if (resolution === "overwrite") {
+          presetsToUpdate.push({
+            id: existingNames.get(preset.name),
+            ...preset
+          });
+        }
+      } else {
+        presetsToInsert.push(preset);
+      }
+    }
+
+    // Insert new presets
+    if (presetsToInsert.length > 0) {
+      const { error } = await supabase
+        .from("filter_presets")
+        .insert(presetsToInsert);
+      if (error) throw error;
+    }
+
+    // Update existing presets
+    for (const preset of presetsToUpdate) {
+      const { error } = await supabase
+        .from("filter_presets")
+        .update({
+          description: preset.description,
+          filter_data: preset.filter_data,
+        })
+        .eq("id", preset.id);
+      if (error) throw error;
+    }
+
+    return { inserted: presetsToInsert.length, updated: presetsToUpdate.length, skipped: skippedCount };
   };
 
   const handleBulkImport = async (zipFile: File) => {
@@ -532,7 +636,18 @@ export function DuplicateCleanupPreview({
         throw new Error("No valid presets found in ZIP file");
       }
 
-      // Bulk insert all presets
+      // Check for conflicts
+      const conflicts = await checkForConflicts(presets);
+      
+      if (conflicts.length > 0) {
+        // Store presets and show conflict resolution dialog
+        setConflictingPresets(presets);
+        setShowConflictDialog(true);
+        setIsBulkExporting(false);
+        return;
+      }
+
+      // No conflicts, proceed with import
       const { error } = await supabase
         .from("filter_presets")
         .insert(presets);
@@ -554,6 +669,32 @@ export function DuplicateCleanupPreview({
       }
     } catch (error: any) {
       toast.error("Failed to import presets: " + error.message);
+    } finally {
+      setIsBulkExporting(false);
+    }
+  };
+
+  const handleConflictResolution = async () => {
+    setShowConflictDialog(false);
+    setIsBulkExporting(true);
+    
+    try {
+      const result = await resolveConflicts(conflictingPresets, conflictResolution);
+      
+      // Refresh presets list
+      queryClient.invalidateQueries({ queryKey: ["cleanup-filter-presets"] });
+      setShowImportDialog(false);
+      setImportFile(null);
+      setConflictingPresets([]);
+
+      const messages: string[] = [];
+      if (result.inserted > 0) messages.push(`${result.inserted} imported`);
+      if (result.updated > 0) messages.push(`${result.updated} overwritten`);
+      if (result.skipped > 0) messages.push(`${result.skipped} skipped`);
+      
+      toast.success(messages.join(", "));
+    } catch (error: any) {
+      toast.error("Failed to resolve conflicts: " + error.message);
     } finally {
       setIsBulkExporting(false);
     }
@@ -1160,6 +1301,84 @@ export function DuplicateCleanupPreview({
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               )}
               Import {importFile?.name.toLowerCase().endsWith('.zip') ? 'All' : 'Preset'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showConflictDialog} onOpenChange={setShowConflictDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-warning" />
+              Preset Name Conflicts Detected
+            </DialogTitle>
+            <DialogDescription>
+              {conflictingPresets.length > 0 && (
+                <>
+                  Found {conflictingPresets.filter(p => {
+                    const existingNames = filterPresets?.map(fp => fp.name) || [];
+                    return existingNames.includes(p.name);
+                  }).length} preset(s) with duplicate names. Choose how to handle conflicts:
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <RadioGroup value={conflictResolution} onValueChange={(value: any) => setConflictResolution(value)}>
+              <div className="flex items-start space-x-3 p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors">
+                <RadioGroupItem value="skip" id="skip" className="mt-0.5" />
+                <div className="flex-1">
+                  <Label htmlFor="skip" className="font-medium cursor-pointer">
+                    Skip duplicates
+                  </Label>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Don't import presets with names that already exist
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-start space-x-3 p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors">
+                <RadioGroupItem value="rename" id="rename" className="mt-0.5" />
+                <div className="flex-1">
+                  <Label htmlFor="rename" className="font-medium cursor-pointer">
+                    Rename duplicates
+                  </Label>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Add a number suffix to duplicate preset names (e.g., "Filter (1)")
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-start space-x-3 p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors">
+                <RadioGroupItem value="overwrite" id="overwrite" className="mt-0.5" />
+                <div className="flex-1">
+                  <Label htmlFor="overwrite" className="font-medium cursor-pointer">
+                    Overwrite existing
+                  </Label>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Replace existing presets with the imported ones
+                  </p>
+                </div>
+              </div>
+            </RadioGroup>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowConflictDialog(false);
+                setConflictingPresets([]);
+                setShowImportDialog(false);
+                setImportFile(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleConflictResolution}
+              disabled={isBulkExporting}
+            >
+              {isBulkExporting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Continue Import
             </Button>
           </DialogFooter>
         </DialogContent>
