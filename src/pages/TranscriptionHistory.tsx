@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet, Columns3, HelpCircle, Keyboard, BarChart3, Clock, Calendar, GitCompare, Merge, Sliders, Tag, Plus, X, Edit2, Palette, Star, MessageSquare, BarChart2, History } from "lucide-react";
+import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet, Columns3, HelpCircle, Keyboard, BarChart3, Clock, Calendar, GitCompare, Merge, Sliders, Tag, Plus, X, Edit2, Palette, Star, MessageSquare, BarChart2, History, Shield, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO, startOfDay, startOfHour, getHours, getDay, startOfWeek, startOfMonth, subDays, endOfDay } from "date-fns";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -316,6 +316,9 @@ export default function TranscriptionHistory() {
   const [showPresetAnalytics, setShowPresetAnalytics] = useState(false);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [selectedPresetForVersion, setSelectedPresetForVersion] = useState<FilterPreset | null>(null);
+  const [showChecksumComparison, setShowChecksumComparison] = useState(false);
+  const [checksumGroups, setChecksumGroups] = useState<Map<string, TranscriptionLog[]>>(new Map());
+  const [selectedChecksumGroup, setSelectedChecksumGroup] = useState<string | null>(null);
 
   // Save filter preferences whenever they change
   useEffect(() => {
@@ -1103,6 +1106,28 @@ export default function TranscriptionHistory() {
     filterLogs();
     setCurrentPage(1); // Reset to first page when filters or sort changes
   }, [searchQuery, contentSearchQuery, checksumQuery, startDate, endDate, logs, sortField, sortDirection, selectedStatuses, lengthRange, selectedTagFilters]);
+
+  // Group files by checksum
+  useEffect(() => {
+    const groups = new Map<string, TranscriptionLog[]>();
+    
+    logs.forEach(log => {
+      if (log.file_checksum) {
+        const existing = groups.get(log.file_checksum) || [];
+        existing.push(log);
+        groups.set(log.file_checksum, existing);
+      }
+    });
+
+    // Sort each group by creation date
+    groups.forEach((group, checksum) => {
+      groups.set(checksum, group.sort((a, b) => 
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      ));
+    });
+
+    setChecksumGroups(groups);
+  }, [logs]);
 
 
   const checkAuth = async () => {
@@ -2331,6 +2356,19 @@ export default function TranscriptionHistory() {
     };
   }, [logs, completedCount, processingCount, failedCount, tags]);
 
+  // Get duplicate files (files with same checksum)
+  const duplicateFiles = useMemo(() => {
+    return Array.from(checksumGroups.entries())
+      .filter(([_, group]) => group.length > 1)
+      .map(([checksum, group]) => ({
+        checksum,
+        count: group.length,
+        files: group,
+        totalSize: group.reduce((sum, log) => sum + (log.transcription_text?.length || 0), 0),
+      }))
+      .sort((a, b) => b.count - a.count);
+  }, [checksumGroups]);
+
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border bg-card">
@@ -3019,6 +3057,21 @@ export default function TranscriptionHistory() {
                     </div>
                   </PopoverContent>
                 </Popover>
+                 
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowChecksumComparison(true)}
+                  title="Compare file versions by checksum"
+                >
+                  <Shield className="h-4 w-4 mr-2" />
+                  Verify Files
+                  {duplicateFiles.length > 0 && (
+                    <Badge variant="secondary" className="ml-2">
+                      {duplicateFiles.length}
+                    </Badge>
+                  )}
+                </Button>
                 
                 {!compareMode ? (
                   <Button
@@ -5219,6 +5272,239 @@ export default function TranscriptionHistory() {
             onRestore={handleVersionRestore}
           />
         )}
+
+        {/* Checksum Comparison Dialog */}
+        <Dialog open={showChecksumComparison} onOpenChange={setShowChecksumComparison}>
+          <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Shield className="h-5 w-5" />
+                File Integrity Verification
+              </DialogTitle>
+              <DialogDescription>
+                Compare checksums to verify file integrity and track versions
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="flex-1 overflow-hidden flex gap-4">
+              {/* Left Panel - Checksum Groups */}
+              <div className="w-1/3 border-r pr-4 overflow-y-auto">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm font-semibold">
+                      File Groups ({checksumGroups.size})
+                    </h3>
+                    {duplicateFiles.length > 0 && (
+                      <Badge variant="secondary">
+                        {duplicateFiles.length} duplicates
+                      </Badge>
+                    )}
+                  </div>
+
+                  {duplicateFiles.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Shield className="h-12 w-12 mx-auto mb-2 opacity-20" />
+                      <p className="text-sm">No duplicate files found</p>
+                      <p className="text-xs mt-1">All files have unique checksums</p>
+                    </div>
+                  ) : (
+                    duplicateFiles.map(({ checksum, count, files, totalSize }) => (
+                      <Card
+                        key={checksum}
+                        className={cn(
+                          "cursor-pointer transition-all hover:border-primary",
+                          selectedChecksumGroup === checksum && "border-primary bg-primary/5"
+                        )}
+                        onClick={() => setSelectedChecksumGroup(checksum)}
+                      >
+                        <CardContent className="p-4">
+                          <div className="flex items-start justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <CheckCircle2 className="h-4 w-4 text-green-600" />
+                              <span className="text-xs font-medium">
+                                {count} versions
+                              </span>
+                            </div>
+                            <Badge variant="outline" className="text-xs">
+                              {totalSize.toLocaleString()} chars
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground mb-2 truncate">
+                            {files[0].file_title}
+                          </p>
+                          <div className="flex items-center gap-1">
+                            <code className="text-xs bg-muted px-2 py-1 rounded font-mono truncate flex-1">
+                              {checksum.substring(0, 16)}...
+                            </code>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigator.clipboard.writeText(checksum);
+                                toast.success('Checksum copied');
+                              }}
+                            >
+                              <Copy className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Right Panel - Version Comparison */}
+              <div className="flex-1 overflow-y-auto">
+                {!selectedChecksumGroup || !checksumGroups.get(selectedChecksumGroup) ? (
+                  <div className="flex items-center justify-center h-full text-muted-foreground">
+                    <div className="text-center">
+                      <GitCompare className="h-16 w-16 mx-auto mb-4 opacity-20" />
+                      <p className="text-sm">Select a file group to compare versions</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {(() => {
+                      const selectedGroup = checksumGroups.get(selectedChecksumGroup)!;
+                      return (
+                        <>
+                          <div className="flex items-center justify-between pb-3 border-b">
+                            <div>
+                              <h3 className="font-semibold">{selectedGroup[0].file_title}</h3>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                {selectedGroup.length} version{selectedGroup.length !== 1 ? 's' : ''} found
+                              </p>
+                            </div>
+                            <Badge variant="outline" className="gap-2">
+                              <Shield className="h-3 w-3" />
+                              Verified
+                            </Badge>
+                          </div>
+
+                          <div className="space-y-3">
+                            {selectedGroup.map((file, index) => (
+                              <Card key={file.id}>
+                                <CardContent className="p-4">
+                                  <div className="flex items-start justify-between mb-3">
+                                    <div className="flex items-center gap-2">
+                                      <Badge variant="secondary" className="text-xs">
+                                        Version {selectedGroup.length - index}
+                                      </Badge>
+                                      {index === 0 && (
+                                        <Badge variant="default" className="text-xs">
+                                          Latest
+                                        </Badge>
+                                      )}
+                                      {file.status === 'completed' && (
+                                        <CheckCircle2 className="h-4 w-4 text-green-600" />
+                                      )}
+                                      {file.status === 'failed' && (
+                                        <XCircle className="h-4 w-4 text-red-600" />
+                                      )}
+                                    </div>
+                                    <span className="text-xs text-muted-foreground">
+                                      {format(new Date(file.created_at), 'MMM dd, yyyy HH:mm')}
+                                    </span>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-3 text-xs">
+                                    <div>
+                                      <span className="text-muted-foreground">Status:</span>
+                                      <p className="font-medium mt-1 capitalize">{file.status}</p>
+                                    </div>
+                                    <div>
+                                      <span className="text-muted-foreground">Content Size:</span>
+                                      <p className="font-medium mt-1">
+                                        {file.transcription_text 
+                                          ? `${file.transcription_text.length.toLocaleString()} chars`
+                                          : 'N/A'
+                                        }
+                                      </p>
+                                    </div>
+                                    <div className="col-span-2">
+                                      <span className="text-muted-foreground">Checksum:</span>
+                                      <div className="flex items-center gap-2 mt-1">
+                                        <code className="text-xs bg-muted px-2 py-1 rounded font-mono truncate flex-1">
+                                          {file.file_checksum}
+                                        </code>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-6 w-6 p-0"
+                                          onClick={() => {
+                                            navigator.clipboard.writeText(file.file_checksum || '');
+                                            toast.success('Checksum copied');
+                                          }}
+                                        >
+                                          <Copy className="h-3 w-3" />
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {file.tags && file.tags.length > 0 && (
+                                    <div className="mt-3 pt-3 border-t">
+                                      <div className="flex flex-wrap gap-1">
+                                        {file.tags.map((tag) => (
+                                          <Badge
+                                            key={tag.id}
+                                            variant="outline"
+                                            className="text-xs"
+                                            style={{
+                                              borderColor: tag.color,
+                                              color: tag.color,
+                                            }}
+                                          >
+                                            {tag.name}
+                                          </Badge>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {index > 0 && (
+                                    <div className="mt-3 pt-3 border-t">
+                                      <p className="text-xs text-muted-foreground">
+                                        <Clock className="h-3 w-3 inline mr-1" />
+                                        {(() => {
+                                          const diffMs = new Date(selectedGroup[0].created_at).getTime() - 
+                                                       new Date(file.created_at).getTime();
+                                          const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+                                          const diffDays = Math.floor(diffHours / 24);
+                                          
+                                          if (diffDays > 0) return `${diffDays} day${diffDays !== 1 ? 's' : ''} older`;
+                                          if (diffHours > 0) return `${diffHours} hour${diffHours !== 1 ? 's' : ''} older`;
+                                          return 'Less than an hour older';
+                                        })()}
+                                      </p>
+                                    </div>
+                                  )}
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-between items-center pt-4 border-t">
+              <div className="text-xs text-muted-foreground">
+                {checksumGroups.size} unique file{checksumGroups.size !== 1 ? 's' : ''} • 
+                {duplicateFiles.length} duplicate group{duplicateFiles.length !== 1 ? 's' : ''}
+              </div>
+              <Button variant="outline" onClick={() => setShowChecksumComparison(false)}>
+                Close
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }
