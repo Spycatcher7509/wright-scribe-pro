@@ -385,33 +385,38 @@ async function getYouTubeContent(
       await updateProgress('downloading', 10, 'Downloading audio...');
     }
 
-    // Download audio using yt-dlp API
     const audioUrl = `https://www.youtube.com/watch?v=${videoId}`;
     console.log("Downloading audio from:", audioUrl);
     
-    // Use a third-party service to extract audio URL
-    const ytDlpResponse = await fetch(`https://www.yt-download.org/api/json/info?url=${encodeURIComponent(audioUrl)}`);
+    // Use yt-dlp command to get audio stream URL
+    const ytDlpProcess = new Deno.Command("yt-dlp", {
+      args: [
+        "--format", "bestaudio",
+        "--get-url",
+        "--no-playlist",
+        audioUrl
+      ],
+      stdout: "piped",
+      stderr: "piped"
+    });
     
-    if (!ytDlpResponse.ok) {
-      throw new Error("Failed to fetch audio download information");
+    console.log("Running yt-dlp to get audio URL...");
+    const { stdout, stderr, success } = await ytDlpProcess.output();
+    
+    if (!success) {
+      const errorText = new TextDecoder().decode(stderr);
+      console.error("yt-dlp error:", errorText);
+      throw new Error(`Failed to get audio URL: ${errorText}`);
     }
     
-    const ytDlpData = await ytDlpResponse.json();
+    const audioStreamUrl = new TextDecoder().decode(stdout).trim();
+    console.log("Got audio stream URL, downloading...");
     
-    // Find the best audio format
-    const audioFormat = ytDlpData.formats?.find((f: any) => 
-      f.acodec !== 'none' && f.vcodec === 'none'
-    ) || ytDlpData.formats?.[0];
-    
-    if (!audioFormat?.url) {
-      throw new Error("Could not find audio stream URL");
-    }
-    
-    console.log("Downloading audio stream...");
-    const audioResponse = await fetch(audioFormat.url);
+    // Download the audio
+    const audioResponse = await fetch(audioStreamUrl);
     
     if (!audioResponse.ok) {
-      throw new Error("Failed to download audio");
+      throw new Error(`Failed to download audio: ${audioResponse.status}`);
     }
     
     const audioBlob = await audioResponse.blob();
