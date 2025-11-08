@@ -568,6 +568,120 @@ export function TranscriptionUpload() {
     }
   };
 
+  
+  // Handle client-side audio download and transcription for videos without captions
+  const handleClientSideAudioTranscription = async (videoId: string, videoUrl: string) => {
+    try {
+      toast.info("No captions found - downloading audio for transcription...", { duration: 3000 });
+      
+      // Step 1: Get the audio URL from our edge function
+      setProgress(10);
+      console.log("Getting audio URL for video:", videoId);
+      
+      const { data: audioData, error: audioError } = await supabase.functions.invoke('get-youtube-audio-url', {
+        body: { videoId }
+      });
+
+      if (audioError) {
+        console.error("Failed to get audio URL:", audioError);
+        throw new Error("Failed to get audio URL from video");
+      }
+
+      if (!audioData || !audioData.audioUrl) {
+        throw new Error("No audio URL returned from service");
+      }
+
+      console.log("Got audio URL, downloading audio...");
+      setProgress(30);
+      toast.info("Downloading audio from YouTube...", { duration: 3000 });
+
+      // Step 2: Download the audio in the browser
+      const audioResponse = await fetch(audioData.audioUrl);
+      
+      if (!audioResponse.ok) {
+        throw new Error(`Failed to download audio: ${audioResponse.status}`);
+      }
+
+      const audioBlob = await audioResponse.blob();
+      console.log(`Audio downloaded: ${audioBlob.size} bytes`);
+      
+      setProgress(50);
+      toast.info("Audio downloaded, transcribing with AI...", { duration: 3000 });
+
+      // Step 3: Convert blob to base64 for the transcribe-audio function
+      const reader = new FileReader();
+      const base64Audio = await new Promise<string>((resolve, reject) => {
+        reader.onloadend = () => {
+          const base64 = reader.result as string;
+          // Remove data:audio/webm;base64, prefix
+          const base64Data = base64.split(',')[1];
+          resolve(base64Data);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(audioBlob);
+      });
+
+      console.log("Audio converted to base64, sending to transcription service...");
+      setProgress(60);
+
+      // Step 4: Send to transcribe-audio function
+      const { data: transcriptionData, error: transcriptionError } = await supabase.functions.invoke('transcribe-audio', {
+        body: {
+          audio: base64Audio
+        }
+      });
+
+      if (transcriptionError) {
+        console.error("Transcription error:", transcriptionError);
+        throw new Error(`Transcription failed: ${transcriptionError.message}`);
+      }
+
+      if (!transcriptionData || !transcriptionData.text) {
+        throw new Error("No transcription text returned");
+      }
+
+      setProgress(100);
+      console.log("Transcription complete!");
+
+      // Get video title
+      const titleResponse = await fetch(`https://www.youtube.com/oembed?url=${videoUrl}&format=json`);
+      let title = `YouTube Video ${videoId}`;
+      if (titleResponse.ok) {
+        const titleData = await titleResponse.json();
+        title = titleData.title || title;
+      }
+
+      // Save to database
+      const { data: logEntry, error: logError } = await supabase
+        .from("transcription_logs")
+        .insert({
+          user_id: (await supabase.auth.getUser()).data.user?.id,
+          file_title: title,
+          status: "completed",
+          transcription_text: transcriptionData.text,
+        })
+        .select()
+        .single();
+
+      if (logError) {
+        console.error("Error saving transcription log:", logError);
+      }
+
+      // Return in the same format as the normal transcription
+      return {
+        text: transcriptionData.text,
+        title,
+        method: "client_audio_download",
+        language: selectedLanguage,
+        logId: logEntry?.id
+      };
+
+    } catch (error: any) {
+      console.error("Client-side audio transcription failed:", error);
+      throw new Error(`Failed to transcribe audio: ${error.message}`);
+    }
+  };
+
   const handleYoutubeTranscribe = async () => {
     if (!youtubeUrl.trim()) {
       toast.error("Please enter a YouTube URL");
@@ -644,7 +758,8 @@ export function TranscriptionUpload() {
         if (!videoIdMatch) {
           throw new Error("Invalid YouTube URL");
         }
-        const cleanUrl = `https://www.youtube.com/watch?v=${videoIdMatch[1]}`;
+        const videoId = videoIdMatch[1];
+        const cleanUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
         const progressInterval = setInterval(() => {
           setProgress((prev) => Math.min(prev + 10, 90));
@@ -652,24 +767,43 @@ export function TranscriptionUpload() {
 
         const { data, error } = await supabase.functions.invoke("transcribe-youtube", {
           body: { 
-            youtubeUrl: cleanUrl, // Use the cleaned URL
+            youtubeUrl: cleanUrl,
             downloadVideo,
             language: selectedLanguage 
           },
         });
 
         clearInterval(progressInterval);
-        setProgress(100);
 
         if (error) throw error;
+        
+        // Check if it's a NO_CAPTIONS_AVAILABLE error - fall back to audio download
+        if (data.error && data.error === "NO_CAPTIONS_AVAILABLE") {
+          console.log("No captions available - falling back to client-side audio download");
+          clearInterval(progressInterval);
+          
+          // Download audio on client side and transcribe
+          return await handleClientSideAudioTranscription(videoId, cleanUrl);
+        }
+        
         if (data.error) throw new Error(data.error);
 
+        setProgress(100);
         return data;
       } catch (error: any) {
-        // Don't retry if video doesn't have captions - that won't change
+        // Check if this is the NO_CAPTIONS error
         const errorMessage = error?.message || error || '';
+        if (errorMessage.includes('NO_CAPTIONS_AVAILABLE')) {
+          const videoIdMatch = youtubeUrl.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+          if (videoIdMatch) {
+            return await handleClientSideAudioTranscription(videoIdMatch[1], youtubeUrl);
+          }
+        }
+        
+        // Don't retry if video doesn't have captions - that won't change
         const isCaptionError = errorMessage.includes('does not have captions') || 
-                              errorMessage.includes('subtitles available');
+                              errorMessage.includes('subtitles available') ||
+                              errorMessage.includes('NO_CAPTIONS_AVAILABLE');
         
         if (isCaptionError) {
           throw error; // Don't retry caption availability issues
