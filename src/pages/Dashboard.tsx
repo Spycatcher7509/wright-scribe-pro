@@ -8,7 +8,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { LogOut, FileAudio, History, Mail, Database, Users, Shield, User } from "lucide-react";
+import { LogOut, FileAudio, History, Mail, Database, Users, Shield, User, Activity } from "lucide-react";
 import { toast } from "sonner";
 import { DisclaimerModal } from "@/components/DisclaimerModal";
 import { TranscriptionUpload } from "@/components/TranscriptionUpload";
@@ -219,7 +219,7 @@ export default function Dashboard() {
 
       <main className="container mx-auto px-4 py-8">
         <Tabs defaultValue="transcribe" className="w-full">
-          <TabsList className={`grid w-full mb-8 ${isAdmin ? 'grid-cols-5' : 'grid-cols-4'}`}>
+          <TabsList className={`grid w-full mb-8 ${isAdmin ? 'grid-cols-6' : 'grid-cols-4'}`}>
             <TabsTrigger value="transcribe">
               <FileAudio className="mr-2 h-4 w-4" />
               Transcribe
@@ -237,10 +237,16 @@ export default function Dashboard() {
               Backup
             </TabsTrigger>
             {isAdmin && (
-              <TabsTrigger value="users">
-                <Users className="mr-2 h-4 w-4" />
-                Users
-              </TabsTrigger>
+              <>
+                <TabsTrigger value="users">
+                  <Users className="mr-2 h-4 w-4" />
+                  Users
+                </TabsTrigger>
+                <TabsTrigger value="activity" onClick={() => navigate("/admin/activity")}>
+                  <Activity className="mr-2 h-4 w-4" />
+                  Activity
+                </TabsTrigger>
+              </>
             )}
           </TabsList>
 
