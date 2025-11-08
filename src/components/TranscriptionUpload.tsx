@@ -506,15 +506,28 @@ export function TranscriptionUpload() {
   };
 
   const handleYouTubeUrlChange = (url: string) => {
-    setYoutubeUrl(url);
+    // Clean and sanitize the URL - remove extra spaces and take only the first valid URL
+    let cleanedUrl = url.trim();
+    
+    // If there are multiple URLs or fragments, extract just the first valid YouTube URL
+    const youtubePattern = /(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+    const match = cleanedUrl.match(youtubePattern);
+    
+    if (match) {
+      // Reconstruct a clean YouTube URL from the matched video ID
+      const videoId = match[4];
+      cleanedUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    }
+    
+    setYoutubeUrl(cleanedUrl);
     setCaptionStatus({ checking: false, available: null });
     setCaptionPreview({ isLoading: false, text: null, lines: [] });
     setShowPreview(false);
     
     // Debounce the caption check
-    if (url.trim()) {
+    if (cleanedUrl.trim()) {
       const timer = setTimeout(() => {
-        checkCaptionAvailability(url);
+        checkCaptionAvailability(cleanedUrl);
       }, 800);
       return () => clearTimeout(timer);
     }
@@ -559,6 +572,20 @@ export function TranscriptionUpload() {
     if (!youtubeUrl.trim()) {
       toast.error("Please enter a YouTube URL");
       return;
+    }
+
+    // Validate and clean the URL one more time before submission
+    const videoIdMatch = youtubeUrl.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+    if (!videoIdMatch) {
+      toast.error("Invalid YouTube URL format. Please enter a valid YouTube video URL.");
+      return;
+    }
+    
+    // Ensure we're using a clean URL
+    const cleanUrl = `https://www.youtube.com/watch?v=${videoIdMatch[1]}`;
+    if (cleanUrl !== youtubeUrl) {
+      console.log("URL was cleaned from:", youtubeUrl, "to:", cleanUrl);
+      setYoutubeUrl(cleanUrl);
     }
 
     // If caption check hasn't run yet, trigger it and wait
@@ -612,13 +639,20 @@ export function TranscriptionUpload() {
           throw new Error("You must be logged in to transcribe videos");
         }
 
+        // Extract and validate video ID one more time before API call
+        const videoIdMatch = youtubeUrl.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+        if (!videoIdMatch) {
+          throw new Error("Invalid YouTube URL");
+        }
+        const cleanUrl = `https://www.youtube.com/watch?v=${videoIdMatch[1]}`;
+
         const progressInterval = setInterval(() => {
           setProgress((prev) => Math.min(prev + 10, 90));
         }, 500);
 
         const { data, error } = await supabase.functions.invoke("transcribe-youtube", {
           body: { 
-            youtubeUrl, 
+            youtubeUrl: cleanUrl, // Use the cleaned URL
             downloadVideo,
             language: selectedLanguage 
           },
