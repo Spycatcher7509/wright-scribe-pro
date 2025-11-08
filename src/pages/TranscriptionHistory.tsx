@@ -8,11 +8,41 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet, Columns3, HelpCircle, Keyboard, BarChart3, Clock, Calendar, GitCompare, Merge, Sliders, Tag, Plus, X, Edit2 } from "lucide-react";
+import { ArrowLeft, Search, Download, Eye, Filter, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, FileArchive, ArrowUpDown, ArrowUp, ArrowDown, Trash2, FileText, CheckCircle2, XCircle, TrendingUp, RefreshCw, FileSpreadsheet, Columns3, HelpCircle, Keyboard, BarChart3, Clock, Calendar, GitCompare, Merge, Sliders, Tag, Plus, X, Edit2, Palette } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO, startOfDay, startOfHour, getHours, getDay, startOfWeek, startOfMonth, subDays, endOfDay } from "date-fns";
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { diffWords } from 'diff';
+
+// Color palette themes for tags
+const COLOR_THEMES = {
+  material: {
+    name: 'Material Design',
+    colors: ['#f44336', '#e91e63', '#9c27b0', '#673ab7', '#3f51b5', '#2196f3', '#03a9f4', '#00bcd4', '#009688', '#4caf50', '#8bc34a', '#cddc39', '#ffeb3b', '#ffc107', '#ff9800', '#ff5722']
+  },
+  tailwind: {
+    name: 'Tailwind',
+    colors: ['#ef4444', '#f97316', '#f59e0b', '#eab308', '#84cc16', '#22c55e', '#10b981', '#14b8a6', '#06b6d4', '#0ea5e9', '#3b82f6', '#6366f1', '#8b5cf6', '#a855f7', '#d946ef', '#ec4899']
+  },
+  pastel: {
+    name: 'Pastel',
+    colors: ['#ffb3ba', '#ffdfba', '#ffffba', '#baffc9', '#bae1ff', '#e0bbff', '#ffccf9', '#ffd4d4', '#fff5ba', '#d4f4dd', '#d4f1f4', '#e5d4ff', '#ffd9f2', '#ffe5d9', '#d9f7be', '#fff7d9']
+  },
+  vibrant: {
+    name: 'Vibrant',
+    colors: ['#ff1744', '#f50057', '#d500f9', '#651fff', '#3d5afe', '#2979ff', '#00b0ff', '#00e5ff', '#1de9b6', '#00e676', '#76ff03', '#c6ff00', '#ffea00', '#ffc400', '#ff9100', '#ff3d00']
+  },
+  professional: {
+    name: 'Professional',
+    colors: ['#1a237e', '#283593', '#303f9f', '#3949ab', '#3f51b5', '#5c6bc0', '#1565c0', '#1976d2', '#1e88e5', '#2196f3', '#42a5f5', '#0277bd', '#0288d1', '#039be5', '#03a9f4', '#29b6f6']
+  },
+  warm: {
+    name: 'Warm Tones',
+    colors: ['#bf360c', '#d84315', '#e64a19', '#f4511e', '#ff5722', '#ff6f00', '#ff8f00', '#ffa000', '#ffb300', '#ffc107', '#ffca28', '#ffd54f', '#ffe082', '#ffecb3', '#fff3e0', '#fff8e1']
+  }
+};
+
+const QUICK_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 import {
   Dialog,
   DialogContent,
@@ -173,6 +203,7 @@ export default function TranscriptionHistory() {
   const [selectedTagFilters, setSelectedTagFilters] = useState<Set<string>>(
     new Set(savedPrefs.selectedTagFilters || [])
   );
+  const [selectedColorTheme, setSelectedColorTheme] = useState<keyof typeof COLOR_THEMES>('tailwind');
 
   // Save filter preferences whenever they change
   useEffect(() => {
@@ -2815,32 +2846,90 @@ export default function TranscriptionHistory() {
 
               <div className="space-y-2">
                 <Label htmlFor="tag-color">Tag Color</Label>
-                <div className="flex items-center gap-4">
-                  <Input
-                    id="tag-color"
-                    type="color"
-                    value={newTagColor}
-                    onChange={(e) => setNewTagColor(e.target.value)}
-                    className="w-24 h-10 cursor-pointer"
-                  />
+                
+                {/* Color Theme Selector */}
+                <div className="space-y-3">
                   <div className="flex items-center gap-2">
-                    <div
-                      className="w-8 h-8 rounded border"
-                      style={{ backgroundColor: newTagColor }}
-                    />
-                    <span className="text-sm text-muted-foreground">{newTagColor}</span>
+                    <Palette className="h-4 w-4 text-muted-foreground" />
+                    <Label className="text-sm">Color Themes</Label>
+                  </div>
+                  <div className="space-y-3">
+                    {Object.entries(COLOR_THEMES).map(([themeKey, theme]) => (
+                      <div key={themeKey} className="space-y-2">
+                        <button
+                          type="button"
+                          className={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${
+                            selectedColorTheme === themeKey 
+                              ? 'border-primary bg-primary/5' 
+                              : 'border-border hover:bg-muted/50'
+                          }`}
+                          onClick={() => setSelectedColorTheme(themeKey as keyof typeof COLOR_THEMES)}
+                        >
+                          <span className="text-sm font-medium">{theme.name}</span>
+                        </button>
+                        {selectedColorTheme === themeKey && (
+                          <div className="grid grid-cols-8 gap-2 p-2 border rounded-lg bg-muted/20">
+                            {theme.colors.map((color) => (
+                              <button
+                                key={color}
+                                type="button"
+                                className={`w-8 h-8 rounded border-2 transition-all hover:scale-110 ${
+                                  newTagColor === color 
+                                    ? 'border-foreground ring-2 ring-offset-2 ring-foreground' 
+                                    : 'border-transparent hover:border-foreground/50'
+                                }`}
+                                style={{ backgroundColor: color }}
+                                onClick={() => setNewTagColor(color)}
+                                title={color}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
-                <div className="flex gap-2 mt-2">
-                  {['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'].map((color) => (
-                    <button
-                      key={color}
-                      className="w-8 h-8 rounded border-2 border-transparent hover:border-foreground transition-colors"
-                      style={{ backgroundColor: color }}
-                      onClick={() => setNewTagColor(color)}
-                      title={color}
+
+                {/* Quick Colors */}
+                <div className="space-y-2 pt-2">
+                  <Label className="text-sm">Quick Colors</Label>
+                  <div className="flex gap-2">
+                    {QUICK_COLORS.map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        className={`w-8 h-8 rounded border-2 transition-all hover:scale-110 ${
+                          newTagColor === color 
+                            ? 'border-foreground ring-2 ring-offset-2 ring-foreground' 
+                            : 'border-transparent hover:border-foreground/50'
+                        }`}
+                        style={{ backgroundColor: color }}
+                        onClick={() => setNewTagColor(color)}
+                        title={color}
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                {/* Custom Color Picker */}
+                <div className="space-y-2 pt-2">
+                  <Label htmlFor="tag-color" className="text-sm">Custom Color</Label>
+                  <div className="flex items-center gap-4">
+                    <Input
+                      id="tag-color"
+                      type="color"
+                      value={newTagColor}
+                      onChange={(e) => setNewTagColor(e.target.value)}
+                      className="w-24 h-10 cursor-pointer"
                     />
-                  ))}
+                    <div className="flex items-center gap-2">
+                      <div
+                        className="w-8 h-8 rounded border"
+                        style={{ backgroundColor: newTagColor }}
+                      />
+                      <span className="text-sm text-muted-foreground font-mono">{newTagColor}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
 
