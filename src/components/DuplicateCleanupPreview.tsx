@@ -7,6 +7,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,8 +20,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Loader2, FileText, Check, X, Shield, ShieldOff, Trash2, Keyboard, Search } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
+import { Loader2, FileText, Check, X, Shield, ShieldOff, Trash2, Keyboard, Search, Filter, CalendarIcon } from "lucide-react";
+import { formatDistanceToNow, format } from "date-fns";
 import { toast } from "sonner";
 
 interface DuplicateCleanupPreviewProps {
@@ -49,6 +52,8 @@ export function DuplicateCleanupPreview({
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showKeyboardHints, setShowKeyboardHints] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [filterType, setFilterType] = useState<"all" | "protected" | "to-delete" | "to-keep" | "date">("all");
+  const [filterDate, setFilterDate] = useState<Date | undefined>(undefined);
   const { data: duplicates, isLoading } = useQuery({
     queryKey: ["cleanup-preview", keepLatest, deleteOlderThanDays],
     queryFn: async () => {
@@ -130,20 +135,56 @@ export function DuplicateCleanupPreview({
     enabled,
   });
 
-  // Filter duplicates based on search query
+  // Filter duplicates based on search query and filter type
   const filteredDuplicates = duplicates?.filter(group => {
-    if (!searchQuery.trim()) return true;
+    if (!searchQuery.trim() && filterType === "all" && !filterDate) return true;
     
     const query = searchQuery.toLowerCase();
-    return group.files.some(file => 
+    const matchesSearch = !searchQuery.trim() || group.files.some(file => 
       file.file_title.toLowerCase().includes(query)
     );
-  }).map(group => ({
-    ...group,
-    files: group.files.filter(file =>
-      file.file_title.toLowerCase().includes(searchQuery.toLowerCase())
-    )
-  }));
+    
+    if (!matchesSearch) return false;
+    
+    // Apply filter type
+    const hasMatchingFiles = group.files.some(file => {
+      if (filterType === "protected") return file.is_protected;
+      if (filterType === "to-delete") return file.willBeDeleted;
+      if (filterType === "to-keep") return !file.willBeDeleted;
+      if (filterType === "date" && filterDate) {
+        return new Date(file.created_at) < filterDate;
+      }
+      return true;
+    });
+    
+    return hasMatchingFiles;
+  }).map(group => {
+    // Filter individual files within groups
+    let filteredFiles = group.files;
+    
+    if (searchQuery.trim()) {
+      filteredFiles = filteredFiles.filter(file =>
+        file.file_title.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+    }
+    
+    if (filterType === "protected") {
+      filteredFiles = filteredFiles.filter(file => file.is_protected);
+    } else if (filterType === "to-delete") {
+      filteredFiles = filteredFiles.filter(file => file.willBeDeleted);
+    } else if (filterType === "to-keep") {
+      filteredFiles = filteredFiles.filter(file => !file.willBeDeleted);
+    } else if (filterType === "date" && filterDate) {
+      filteredFiles = filteredFiles.filter(file => 
+        new Date(file.created_at) < filterDate
+      );
+    }
+    
+    return {
+      ...group,
+      files: filteredFiles
+    };
+  }).filter(group => group.files.length > 0);
 
   const totalToDelete = filteredDuplicates?.reduce(
     (sum, group) => sum + group.files.filter(f => f.willBeDeleted).length,
@@ -299,6 +340,13 @@ export function DuplicateCleanupPreview({
         return;
       }
 
+      // Ctrl+F - Focus search
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault();
+        document.getElementById('file-search-input')?.focus();
+        return;
+      }
+
       // ? - Show keyboard hints
       if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
@@ -372,6 +420,7 @@ export function DuplicateCleanupPreview({
             <div className="text-sm font-medium mb-2">Keyboard Shortcuts</div>
             <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
               <div><kbd className="px-2 py-1 bg-background border rounded">Ctrl+A</kbd> Select all</div>
+              <div><kbd className="px-2 py-1 bg-background border rounded">Ctrl+F</kbd> Focus search</div>
               <div><kbd className="px-2 py-1 bg-background border rounded">Delete</kbd> Delete selected</div>
               <div><kbd className="px-2 py-1 bg-background border rounded">Esc</kbd> Clear selection</div>
               <div><kbd className="px-2 py-1 bg-background border rounded">?</kbd> Toggle hints</div>
@@ -420,16 +469,74 @@ export function DuplicateCleanupPreview({
         )}
       </CardHeader>
       <CardContent>
-        <div className="mb-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Search files by name..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9"
-            />
+        <div className="space-y-3 mb-4">
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                id="file-search-input"
+                placeholder="Search files by name..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <Select value={filterType} onValueChange={(value: any) => setFilterType(value)}>
+              <SelectTrigger className="w-[180px]">
+                <Filter className="h-4 w-4 mr-2" />
+                <SelectValue placeholder="Filter files" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All files</SelectItem>
+                <SelectItem value="protected">Protected only</SelectItem>
+                <SelectItem value="to-delete">To be deleted</SelectItem>
+                <SelectItem value="to-keep">To be kept</SelectItem>
+                <SelectItem value="date">Older than date</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
+          
+          {filterType === "date" && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className="w-full justify-start text-left font-normal"
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {filterDate ? format(filterDate, "PPP") : <span>Pick a date</span>}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0 bg-background" align="start">
+                <Calendar
+                  mode="single"
+                  selected={filterDate}
+                  onSelect={setFilterDate}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+          )}
+          
+          {(searchQuery || filterType !== "all" || filterDate) && (
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary" className="text-xs">
+                Filters active
+              </Badge>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setSearchQuery("");
+                  setFilterType("all");
+                  setFilterDate(undefined);
+                }}
+                className="h-7 text-xs"
+              >
+                Clear all filters
+              </Button>
+            </div>
+          )}
         </div>
 
         {!duplicates || duplicates.length === 0 ? (
