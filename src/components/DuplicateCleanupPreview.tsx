@@ -1307,24 +1307,21 @@ export function DuplicateCleanupPreview({
       </Dialog>
 
       <Dialog open={showConflictDialog} onOpenChange={setShowConflictDialog}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-warning" />
               Preset Name Conflicts Detected
             </DialogTitle>
             <DialogDescription>
-              {conflictingPresets.length > 0 && (
-                <>
-                  Found {conflictingPresets.filter(p => {
-                    const existingNames = filterPresets?.map(fp => fp.name) || [];
-                    return existingNames.includes(p.name);
-                  }).length} preset(s) with duplicate names. Choose how to handle conflicts:
-                </>
-              )}
+              {conflictingPresets.length > 0 && (() => {
+                const existingNames = new Set(filterPresets?.map(fp => fp.name) || []);
+                const conflicts = conflictingPresets.filter(p => existingNames.has(p.name));
+                return `Found ${conflicts.length} preset(s) with duplicate names. Choose how to handle conflicts:`;
+              })()}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-4 flex-1 overflow-hidden flex flex-col">
             <RadioGroup value={conflictResolution} onValueChange={(value: any) => setConflictResolution(value)}>
               <div className="flex items-start space-x-3 p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors">
                 <RadioGroupItem value="skip" id="skip" className="mt-0.5" />
@@ -1360,6 +1357,91 @@ export function DuplicateCleanupPreview({
                 </div>
               </div>
             </RadioGroup>
+
+            <div className="flex-1 overflow-hidden flex flex-col">
+              <Label className="mb-2">Preview of Changes:</Label>
+              <ScrollArea className="border rounded-lg flex-1">
+                <div className="p-4 space-y-3">
+                  {conflictingPresets.map((preset, index) => {
+                    const existingNames = new Set(filterPresets?.map(fp => fp.name) || []);
+                    const isConflict = existingNames.has(preset.name);
+                    
+                    if (!isConflict && conflictResolution === "skip") return null;
+
+                    let actionBadge = null;
+                    let newName = preset.name;
+
+                    if (isConflict) {
+                      if (conflictResolution === "skip") {
+                        actionBadge = <Badge variant="secondary" className="text-xs">Will Skip</Badge>;
+                      } else if (conflictResolution === "rename") {
+                        // Calculate what the new name would be
+                        let counter = 1;
+                        newName = `${preset.name} (${counter})`;
+                        while (existingNames.has(newName)) {
+                          counter++;
+                          newName = `${preset.name} (${counter})`;
+                        }
+                        actionBadge = <Badge variant="default" className="text-xs">Will Rename</Badge>;
+                      } else if (conflictResolution === "overwrite") {
+                        actionBadge = <Badge variant="destructive" className="text-xs">Will Overwrite</Badge>;
+                      }
+                    } else {
+                      actionBadge = <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/20">Will Import</Badge>;
+                    }
+
+                    return (
+                      <div key={index} className="p-3 rounded-lg border bg-muted/50 space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm truncate">
+                              {conflictResolution === "rename" && isConflict ? newName : preset.name}
+                            </div>
+                            {preset.description && (
+                              <p className="text-xs text-muted-foreground mt-1">
+                                {preset.description}
+                              </p>
+                            )}
+                            {conflictResolution === "rename" && isConflict && (
+                              <p className="text-xs text-warning mt-1">
+                                Original name: "{preset.name}"
+                              </p>
+                            )}
+                            {conflictResolution === "overwrite" && isConflict && (
+                              <p className="text-xs text-destructive mt-1">
+                                ⚠️ This will replace your existing preset
+                              </p>
+                            )}
+                          </div>
+                          {actionBadge}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </ScrollArea>
+            </div>
+
+            {conflictResolution === "skip" && (() => {
+              const existingNames = new Set(filterPresets?.map(fp => fp.name) || []);
+              const willSkip = conflictingPresets.filter(p => existingNames.has(p.name)).length;
+              const willImport = conflictingPresets.length - willSkip;
+              return willSkip > 0 && (
+                <div className="text-sm bg-warning/10 border border-warning/20 text-warning-foreground p-3 rounded-lg">
+                  {willSkip} preset{willSkip !== 1 ? 's' : ''} will be skipped, {willImport} will be imported
+                </div>
+              );
+            })()}
+
+            {conflictResolution === "overwrite" && (() => {
+              const existingNames = new Set(filterPresets?.map(fp => fp.name) || []);
+              const willOverwrite = conflictingPresets.filter(p => existingNames.has(p.name)).length;
+              return willOverwrite > 0 && (
+                <div className="text-sm bg-destructive/10 border border-destructive/20 text-destructive p-3 rounded-lg">
+                  ⚠️ This will permanently replace {willOverwrite} existing preset{willOverwrite !== 1 ? 's' : ''}
+                </div>
+              );
+            })()}
           </div>
           <DialogFooter>
             <Button
