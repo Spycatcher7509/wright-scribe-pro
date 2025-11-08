@@ -43,12 +43,42 @@ serve(async (req) => {
     const formData = await req.formData();
     const file = formData.get('file') as File;
     const fileName = formData.get('fileName') as string;
+    const fileChecksum = formData.get('fileChecksum') as string;
 
     if (!file) {
       throw new Error('No file provided');
     }
 
-    console.log(`Translating file: ${fileName}, size: ${file.size} bytes`);
+    console.log(`Translating file: ${fileName}, size: ${file.size} bytes, checksum: ${fileChecksum}`);
+
+    // Check for duplicate file by checksum (for translations)
+    if (fileChecksum) {
+      const { data: existingLog } = await supabase
+        .from('transcription_logs')
+        .select('*')
+        .eq('file_checksum', fileChecksum)
+        .eq('user_id', user.id)
+        .eq('status', 'completed')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (existingLog) {
+        console.log('Duplicate file found, returning cached result');
+        return new Response(
+          JSON.stringify({
+            text: existingLog.transcription_text,
+            logId: existingLog.id,
+            language: 'en',
+            cached: true,
+            message: 'Returned cached translation for duplicate file',
+          }),
+          {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+    }
 
     // Create a log entry in the database
     const { data: logData, error: logError } = await supabase
@@ -56,6 +86,7 @@ serve(async (req) => {
       .insert({
         user_id: user.id,
         file_title: fileName,
+        file_checksum: fileChecksum,
         status: 'processing',
       })
       .select()

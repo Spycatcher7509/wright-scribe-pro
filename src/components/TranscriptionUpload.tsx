@@ -7,8 +7,10 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { toast } from "sonner";
-import { Upload, FileAudio, Loader2, Youtube } from "lucide-react";
+import { Upload, FileAudio, Loader2, Youtube, AlertTriangle } from "lucide-react";
+import { calculateFileChecksum } from "@/lib/checksumUtils";
 
 interface TranscriptionResult {
   text: string;
@@ -20,6 +22,8 @@ interface TranscriptionResult {
 
 export function TranscriptionUpload() {
   const [file, setFile] = useState<File | null>(null);
+  const [fileChecksum, setFileChecksum] = useState<string>("");
+  const [duplicateWarning, setDuplicateWarning] = useState<{ exists: boolean; log?: any } | null>(null);
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [downloadVideo, setDownloadVideo] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -27,7 +31,7 @@ export function TranscriptionUpload() {
   const [result, setResult] = useState<TranscriptionResult | null>(null);
   const [mode, setMode] = useState<'transcribe' | 'translate'>('transcribe');
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
       // Check file size (max 25MB for Whisper API)
@@ -48,6 +52,39 @@ export function TranscriptionUpload() {
 
       setFile(selectedFile);
       setResult(null);
+      setDuplicateWarning(null);
+
+      // Calculate checksum
+      try {
+        toast.info("Calculating file checksum...");
+        const checksum = await calculateFileChecksum(selectedFile);
+        setFileChecksum(checksum);
+
+        // Check if file already exists
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: existingLogs } = await supabase
+            .from('transcription_logs')
+            .select('*')
+            .eq('file_checksum', checksum)
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false })
+            .limit(1);
+
+          if (existingLogs && existingLogs.length > 0) {
+            setDuplicateWarning({
+              exists: true,
+              log: existingLogs[0]
+            });
+            toast.warning("This file has been processed before");
+          } else {
+            toast.success("File validated - no duplicates found");
+          }
+        }
+      } catch (error) {
+        console.error("Error calculating checksum:", error);
+        toast.error("Failed to calculate file checksum");
+      }
     }
   };
 
@@ -76,6 +113,7 @@ export function TranscriptionUpload() {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("fileName", file.name);
+      formData.append("fileChecksum", fileChecksum);
 
       const functionName = mode === 'translate' ? 'translate-audio' : 'transcribe-audio';
       const { data, error } = await supabase.functions.invoke(functionName, {
@@ -172,6 +210,8 @@ export function TranscriptionUpload() {
 
   const handleReset = () => {
     setFile(null);
+    setFileChecksum("");
+    setDuplicateWarning(null);
     setYoutubeUrl("");
     setResult(null);
     setProgress(0);
@@ -228,6 +268,25 @@ export function TranscriptionUpload() {
                     </p>
                   </div>
                 </div>
+
+                {duplicateWarning?.exists && (
+                  <Alert variant="destructive">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertDescription>
+                      <strong>Duplicate file detected!</strong>
+                      <p className="text-sm mt-1">
+                        This file was already processed on{' '}
+                        {new Date(duplicateWarning.log.created_at).toLocaleString()}.
+                        Status: {duplicateWarning.log.status}
+                      </p>
+                      {duplicateWarning.log.status === 'completed' && (
+                        <p className="text-sm mt-1">
+                          You can view the previous result in your transcription history.
+                        </p>
+                      )}
+                    </AlertDescription>
+                  </Alert>
+                )}
 
                 <div className="space-y-2">
                   <Label>Mode</Label>

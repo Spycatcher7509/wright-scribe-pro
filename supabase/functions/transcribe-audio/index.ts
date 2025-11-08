@@ -100,6 +100,7 @@ serve(async (req: Request) => {
     const formData = await req.formData();
     const audioFile = formData.get("file") as File;
     const fileName = formData.get("fileName") as string;
+    const fileChecksum = formData.get("fileChecksum") as string;
 
     if (!audioFile) {
       return new Response(
@@ -108,7 +109,35 @@ serve(async (req: Request) => {
       );
     }
 
-    console.log(`Processing transcription for user ${user.id}, file: ${fileName}`);
+    console.log(`Processing transcription for user ${user.id}, file: ${fileName}, checksum: ${fileChecksum}`);
+
+    // Check for duplicate file by checksum
+    if (fileChecksum) {
+      const { data: existingLog } = await supabase
+        .from('transcription_logs')
+        .select('*')
+        .eq('file_checksum', fileChecksum)
+        .eq('user_id', user.id)
+        .eq('status', 'completed')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (existingLog) {
+        console.log('Duplicate file found, returning cached result');
+        return new Response(
+          JSON.stringify({
+            text: existingLog.transcription_text,
+            logId: existingLog.id,
+            cached: true,
+            message: 'Returned cached transcription for duplicate file',
+          }),
+          {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+    }
 
     // Create transcription log entry with pending status
     const { data: logEntry, error: logError } = await supabase
@@ -116,6 +145,7 @@ serve(async (req: Request) => {
       .insert({
         user_id: user.id,
         file_title: fileName,
+        file_checksum: fileChecksum,
         status: "processing",
       })
       .select()
