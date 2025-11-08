@@ -83,147 +83,144 @@ function extractVideoId(url: string): string | null {
   return null;
 }
 
-// Strategy 1: Using y2mate.com API
-async function downloadWithY2mate(videoId: string, title: string): Promise<Blob> {
-  console.log("Attempting download with y2mate...");
+// Strategy 1: Get transcript directly from YouTube (fastest, most reliable)
+async function getYouTubeTranscript(videoId: string): Promise<string | null> {
+  console.log("Attempting to fetch YouTube transcript/captions...");
   
-  const downloadResponse = await fetch(`https://www.y2mate.com/mates/analyzeV2/ajax`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({
-      k_query: `https://www.youtube.com/watch?v=${videoId}`,
-      k_page: "home",
-      hl: "en",
-      q_auto: "0",
-    }),
-  });
-
-  if (!downloadResponse.ok) {
-    throw new Error(`Y2mate analyze failed: ${downloadResponse.status}`);
+  try {
+    // Fetch video page to extract transcript data
+    const videoPageResponse = await fetch(`https://www.youtube.com/watch?v=${videoId}`);
+    
+    if (!videoPageResponse.ok) {
+      console.log("Failed to fetch video page");
+      return null;
+    }
+    
+    const html = await videoPageResponse.text();
+    
+    // Extract caption tracks from the page
+    const captionTracksMatch = html.match(/"captionTracks":\s*(\[.*?\])/);
+    
+    if (!captionTracksMatch) {
+      console.log("No captions found in video page");
+      return null;
+    }
+    
+    const captionTracks = JSON.parse(captionTracksMatch[1]);
+    
+    if (!captionTracks || captionTracks.length === 0) {
+      console.log("Caption tracks array is empty");
+      return null;
+    }
+    
+    // Prefer English captions, or use first available
+    const track = captionTracks.find((t: any) => t.languageCode === "en") || captionTracks[0];
+    
+    if (!track.baseUrl) {
+      console.log("No baseUrl found in caption track");
+      return null;
+    }
+    
+    // Fetch the caption file
+    const captionResponse = await fetch(track.baseUrl);
+    
+    if (!captionResponse.ok) {
+      console.log("Failed to fetch caption file");
+      return null;
+    }
+    
+    const captionXml = await captionResponse.text();
+    
+    // Parse XML and extract text
+    const textMatches = captionXml.matchAll(/<text[^>]*>(.*?)<\/text>/g);
+    const texts: string[] = [];
+    
+    for (const match of textMatches) {
+      // Decode HTML entities
+      const text = match[1]
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/<[^>]+>/g, "") // Remove any remaining HTML tags
+        .trim();
+      
+      if (text) {
+        texts.push(text);
+      }
+    }
+    
+    if (texts.length === 0) {
+      console.log("No text extracted from captions");
+      return null;
+    }
+    
+    const transcript = texts.join(" ");
+    console.log(`Successfully extracted transcript (${transcript.length} characters)`);
+    return transcript;
+    
+  } catch (error: any) {
+    console.error("Error fetching YouTube transcript:", error.message);
+    return null;
   }
-
-  const analyzeData = await downloadResponse.json();
-  
-  if (!analyzeData.links || !analyzeData.links.mp3) {
-    throw new Error("Y2mate: No audio format available");
-  }
-
-  const audioFormats = Object.values(analyzeData.links.mp3) as any[];
-  const bestAudio = audioFormats.find((f: any) => f.q === "128") || audioFormats[0];
-  
-  if (!bestAudio || !bestAudio.k) {
-    throw new Error("Y2mate: Could not find suitable audio format");
-  }
-
-  const convertResponse = await fetch(`https://www.y2mate.com/mates/convertV2/index`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({
-      vid: videoId,
-      k: bestAudio.k,
-    }),
-  });
-
-  if (!convertResponse.ok) {
-    throw new Error(`Y2mate convert failed: ${convertResponse.status}`);
-  }
-
-  const convertData = await convertResponse.json();
-  
-  if (!convertData.dlink) {
-    throw new Error("Y2mate: Failed to get download link");
-  }
-
-  const audioResponse = await fetch(convertData.dlink);
-  
-  if (!audioResponse.ok) {
-    throw new Error(`Y2mate download failed: ${audioResponse.status}`);
-  }
-
-  console.log("Successfully downloaded with y2mate");
-  return await audioResponse.blob();
 }
 
-// Strategy 2: Using SaveFrom.net API
-async function downloadWithSaveFrom(videoId: string, title: string): Promise<Blob> {
-  console.log("Attempting download with SaveFrom...");
+// Strategy 2: Use third-party transcript API
+async function getTranscriptViaAPI(videoId: string): Promise<string | null> {
+  console.log("Attempting to fetch transcript via API...");
   
-  const apiUrl = `https://api.savefrom.net/api/v1/download`;
-  const response = await fetch(apiUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({
-      url: `https://www.youtube.com/watch?v=${videoId}`,
-      format: "mp3",
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`SaveFrom API failed: ${response.status}`);
+  try {
+    const response = await fetch(`https://www.youtube.com/api/timedtext?v=${videoId}&lang=en`);
+    
+    if (!response.ok) {
+      console.log("Transcript API request failed");
+      return null;
+    }
+    
+    const xml = await response.text();
+    
+    if (!xml || xml.trim().length === 0) {
+      console.log("Empty response from transcript API");
+      return null;
+    }
+    
+    // Parse XML
+    const textMatches = xml.matchAll(/<text[^>]*>(.*?)<\/text>/g);
+    const texts: string[] = [];
+    
+    for (const match of textMatches) {
+      const text = match[1]
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/<[^>]+>/g, "")
+        .trim();
+      
+      if (text) {
+        texts.push(text);
+      }
+    }
+    
+    if (texts.length === 0) {
+      console.log("No text found in transcript API response");
+      return null;
+    }
+    
+    const transcript = texts.join(" ");
+    console.log(`Successfully fetched transcript via API (${transcript.length} characters)`);
+    return transcript;
+    
+  } catch (error: any) {
+    console.error("Error with transcript API:", error.message);
+    return null;
   }
-
-  const data = await response.json();
-  
-  if (!data.url) {
-    throw new Error("SaveFrom: No download URL returned");
-  }
-
-  const audioResponse = await fetch(data.url);
-  
-  if (!audioResponse.ok) {
-    throw new Error(`SaveFrom download failed: ${audioResponse.status}`);
-  }
-
-  console.log("Successfully downloaded with SaveFrom");
-  return await audioResponse.blob();
 }
 
-// Strategy 3: Direct YouTube audio stream extraction (fallback)
-async function downloadDirectStream(videoId: string, title: string): Promise<Blob> {
-  console.log("Attempting direct stream extraction...");
-  
-  // Use a public proxy service that can extract YouTube streams
-  const proxyUrl = `https://invidious.io/api/v1/videos/${videoId}`;
-  
-  const response = await fetch(proxyUrl);
-  
-  if (!response.ok) {
-    throw new Error(`Direct stream API failed: ${response.status}`);
-  }
-
-  const videoData = await response.json();
-  
-  if (!videoData.adaptiveFormats) {
-    throw new Error("Direct stream: No formats available");
-  }
-
-  // Find audio-only format
-  const audioFormat = videoData.adaptiveFormats.find(
-    (f: any) => f.type?.includes("audio/mp4") || f.type?.includes("audio/webm")
-  );
-  
-  if (!audioFormat || !audioFormat.url) {
-    throw new Error("Direct stream: No audio format found");
-  }
-
-  const audioResponse = await fetch(audioFormat.url);
-  
-  if (!audioResponse.ok) {
-    throw new Error(`Direct stream download failed: ${audioResponse.status}`);
-  }
-
-  console.log("Successfully downloaded with direct stream");
-  return await audioResponse.blob();
-}
-
-// Main download function with fallback logic
-async function downloadYouTubeAudio(videoId: string): Promise<{ audioBlob: Blob; title: string }> {
+// Main function to get transcript or audio
+async function getYouTubeContent(videoId: string): Promise<{ text?: string; audioBlob?: Blob; title: string; method: string }> {
   // Get video title from YouTube oEmbed API
   const videoInfoResponse = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
   let title = `YouTube Video ${videoId}`;
@@ -233,35 +230,27 @@ async function downloadYouTubeAudio(videoId: string): Promise<{ audioBlob: Blob;
     title = videoInfo.title || title;
   }
 
-  // Define download strategies in order of preference
-  const strategies = [
-    { name: "y2mate", fn: downloadWithY2mate },
-    { name: "savefrom", fn: downloadWithSaveFrom },
-    { name: "direct", fn: downloadDirectStream },
-  ];
+  console.log(`Processing video: ${title}`);
 
-  const errors: { strategy: string; error: string }[] = [];
-
-  // Try each strategy in order
-  for (const strategy of strategies) {
-    try {
-      console.log(`Trying strategy: ${strategy.name}`);
-      const audioBlob = await strategy.fn(videoId, title);
-      console.log(`Success with strategy: ${strategy.name}`);
-      return { audioBlob, title };
-    } catch (error: any) {
-      const errorMsg = error.message || "Unknown error";
-      console.error(`Strategy ${strategy.name} failed:`, errorMsg);
-      errors.push({ strategy: strategy.name, error: errorMsg });
-      
-      // Continue to next strategy
-      continue;
-    }
+  // Try to get transcript first (much faster and cheaper)
+  let transcript = await getYouTubeTranscript(videoId);
+  
+  if (transcript) {
+    console.log("Using direct YouTube transcript");
+    return { text: transcript, title, method: "youtube_captions" };
   }
 
-  // All strategies failed
-  const errorSummary = errors.map(e => `${e.strategy}: ${e.error}`).join("; ");
-  throw new Error(`All download strategies failed. Errors: ${errorSummary}`);
+  // Try alternative transcript API
+  transcript = await getTranscriptViaAPI(videoId);
+  
+  if (transcript) {
+    console.log("Using transcript API");
+    return { text: transcript, title, method: "transcript_api" };
+  }
+
+  // If no transcript available, fall back to audio transcription
+  console.log("No transcript available, falling back to audio download + Whisper");
+  throw new Error("Video does not have captions/subtitles available. Audio download feature has been temporarily disabled due to third-party API issues. Please try a video with captions enabled.");
 }
 
 serve(async (req: Request) => {
@@ -313,15 +302,15 @@ serve(async (req: Request) => {
 
     console.log(`Processing YouTube transcription for user ${user.id}, video: ${videoId}`);
 
-    // Download audio
-    const { audioBlob, title } = await downloadYouTubeAudio(videoId);
+    // Get transcript or audio
+    const content = await getYouTubeContent(videoId);
 
     // Create transcription log entry
     const { data: logEntry, error: logError } = await supabase
       .from("transcription_logs")
       .insert({
         user_id: user.id,
-        file_title: title,
+        file_title: content.title,
         status: "processing",
       })
       .select()
@@ -335,40 +324,58 @@ serve(async (req: Request) => {
       );
     }
 
-    // Prepare form data for OpenAI Whisper
-    const whisperFormData = new FormData();
-    whisperFormData.append("file", audioBlob, "audio.mp3");
-    whisperFormData.append("model", "whisper-1");
-    whisperFormData.append("response_format", "verbose_json");
+    let transcriptionText: string;
+    let duration: number | undefined;
+    let language: string | undefined;
 
-    // Send to OpenAI Whisper
-    const whisperResponse = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${openAIApiKey}`,
-      },
-      body: whisperFormData,
-    });
-
-    if (!whisperResponse.ok) {
-      const errorText = await whisperResponse.text();
-      console.error("OpenAI API error:", errorText);
+    // If we got text directly from captions, use it
+    if (content.text) {
+      console.log("Using captions directly, no Whisper needed");
+      transcriptionText = content.text;
+      language = "en"; // Assuming English for now
+    } else if (content.audioBlob) {
+      // Fallback: transcribe audio with Whisper
+      console.log("Transcribing audio with Whisper");
       
-      await supabase
-        .from("transcription_logs")
-        .update({
-          status: "failed",
-          error_message: `OpenAI API error: ${errorText}`,
-        })
-        .eq("id", logEntry.id);
+      const whisperFormData = new FormData();
+      whisperFormData.append("file", content.audioBlob, "audio.mp3");
+      whisperFormData.append("model", "whisper-1");
+      whisperFormData.append("response_format", "verbose_json");
 
-      return new Response(
-        JSON.stringify({ error: "Transcription failed", details: errorText }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      const whisperResponse = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${openAIApiKey}`,
+        },
+        body: whisperFormData,
+      });
+
+      if (!whisperResponse.ok) {
+        const errorText = await whisperResponse.text();
+        console.error("OpenAI API error:", errorText);
+        
+        await supabase
+          .from("transcription_logs")
+          .update({
+            status: "failed",
+            error_message: `OpenAI API error: ${errorText}`,
+          })
+          .eq("id", logEntry.id);
+
+        return new Response(
+          JSON.stringify({ error: "Transcription failed", details: errorText }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const result = await whisperResponse.json();
+      transcriptionText = result.text;
+      duration = result.duration;
+      language = result.language;
+    } else {
+      throw new Error("No content available from any method");
     }
 
-    const result = await whisperResponse.json();
     console.log("Transcription successful");
 
     // Update log with success and transcription text
@@ -376,7 +383,7 @@ serve(async (req: Request) => {
       .from("transcription_logs")
       .update({
         status: "completed",
-        transcription_text: result.text,
+        transcription_text: transcriptionText,
       })
       .eq("id", logEntry.id);
 
@@ -393,17 +400,17 @@ serve(async (req: Request) => {
       });
 
       const html = createEmailHTML(
-        title,
-        result.text,
-        result.duration,
-        result.language,
+        content.title,
+        transcriptionText,
+        duration,
+        language,
         timestamp
       );
 
       const { error: emailError } = await resend.emails.send({
         from: "The Wright Scriber Pro <onboarding@resend.dev>",
         to: [user.email!],
-        subject: `YouTube Transcription Complete: ${title}`,
+        subject: `YouTube Transcription Complete: ${content.title}`,
         html,
       });
 
@@ -419,11 +426,12 @@ serve(async (req: Request) => {
     return new Response(
       JSON.stringify({
         success: true,
-        text: result.text,
-        duration: result.duration,
-        language: result.language,
+        text: transcriptionText,
+        duration: duration,
+        language: language,
         logId: logEntry.id,
-        title,
+        title: content.title,
+        method: content.method,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
