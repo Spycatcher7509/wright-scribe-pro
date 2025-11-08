@@ -2,6 +2,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.80.0";
 import { Resend } from "https://esm.sh/resend@2.0.0";
+import { Innertube } from "https://esm.sh/youtubei.js@10.5.0/web";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -377,9 +378,100 @@ async function getYouTubeContent(
     return { text: transcript, title, method: "transcript_api", language };
   }
 
-  // No transcript available - captions are required
-  console.log("No transcript/captions available for this video");
-  throw new Error("This video does not have captions or subtitles available. Please try a video with captions enabled.");
+  // If no transcript available, download audio and use Whisper
+  console.log("No captions available - will download audio and transcribe with Whisper");
+  
+  try {
+    if (updateProgress) {
+      await updateProgress('downloading', 10, 'Initializing YouTube client...');
+    }
+
+    console.log("Initializing YouTube client...");
+    const youtube = await Innertube.create();
+    
+    if (updateProgress) {
+      await updateProgress('downloading', 20, 'Fetching video information...');
+    }
+
+    console.log("Getting video info for ID:", videoId);
+    const videoInfo = await youtube.getInfo(videoId);
+    
+    if (updateProgress) {
+      await updateProgress('downloading', 30, 'Finding audio stream...');
+    }
+    
+    // Get the best audio format
+    const audioFormat = videoInfo.chooseFormat({ type: 'audio', quality: 'best' });
+    
+    if (!audioFormat) {
+      throw new Error("Could not find audio stream for this video");
+    }
+
+    console.log("Found audio format:", audioFormat.mime_type, "bitrate:", audioFormat.bitrate);
+    
+    if (updateProgress) {
+      await updateProgress('downloading', 40, 'Downloading audio stream...');
+    }
+
+    // Get the decipher function and audio URL
+    const audioUrl = audioFormat.decipher(youtube.session.player);
+    console.log("Downloading audio from stream...");
+    
+    const audioResponse = await fetch(audioUrl);
+    
+    if (!audioResponse.ok) {
+      throw new Error(`Failed to download audio: ${audioResponse.status} ${audioResponse.statusText}`);
+    }
+
+    const audioArrayBuffer = await audioResponse.arrayBuffer();
+    const audioBlob = new Blob([audioArrayBuffer], { type: 'audio/webm' });
+    console.log(`Audio downloaded: ${audioBlob.size} bytes`);
+    
+    if (updateProgress) {
+      await updateProgress('transcribing', 60, 'Transcribing audio with OpenAI Whisper...');
+    }
+
+    // Transcribe using OpenAI Whisper
+    console.log("Transcribing with OpenAI Whisper...");
+    const formData = new FormData();
+    formData.append('file', audioBlob, 'audio.webm');
+    formData.append('model', 'whisper-1');
+    if (language !== 'en') {
+      formData.append('language', language);
+    }
+    
+    const whisperResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openAIApiKey}`,
+      },
+      body: formData,
+    });
+    
+    if (!whisperResponse.ok) {
+      const errorText = await whisperResponse.text();
+      console.error("Whisper API error:", errorText);
+      throw new Error(`Whisper transcription failed: ${whisperResponse.status}`);
+    }
+    
+    const whisperData = await whisperResponse.json();
+    console.log("Whisper transcription complete");
+    
+    if (updateProgress) {
+      await updateProgress('completed', 100, 'Transcription complete!');
+    }
+
+    return { 
+      text: whisperData.text, 
+      title, 
+      method: "whisper_transcription",
+      language: whisperData.language || language
+    };
+    
+  } catch (audioError: any) {
+    console.error("Audio transcription failed:", audioError);
+    throw new Error(`Failed to transcribe audio: ${audioError.message}`);
+  }
 }
 
 serve(async (req: Request) => {
