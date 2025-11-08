@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,7 +6,17 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, FileText, Check, X, Shield, ShieldOff } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Loader2, FileText, Check, X, Shield, ShieldOff, Trash2, Keyboard } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
@@ -35,6 +45,8 @@ export function DuplicateCleanupPreview({
 }: DuplicateCleanupPreviewProps) {
   const queryClient = useQueryClient();
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showKeyboardHints, setShowKeyboardHints] = useState(false);
   const { data: duplicates, isLoading } = useQuery({
     queryKey: ["cleanup-preview", keepLatest, deleteOlderThanDays],
     queryFn: async () => {
@@ -203,6 +215,85 @@ export function DuplicateCleanupPreview({
     setSelectedFiles(new Set());
   };
 
+  const handleDeleteSelected = () => {
+    if (selectedFiles.size === 0) return;
+    setShowDeleteDialog(true);
+  };
+
+  const confirmDelete = async () => {
+    const selectedIds = Array.from(selectedFiles);
+    
+    // Determine if files are protected or not
+    const selectedFilesData = duplicates?.flatMap(g => g.files).filter(f => selectedIds.includes(f.id)) || [];
+    const hasProtected = selectedFilesData.some(f => f.is_protected);
+    const hasUnprotected = selectedFilesData.some(f => !f.is_protected);
+    
+    if (hasProtected && hasUnprotected) {
+      // Mixed selection - let user choose
+      toast.error("Please select either protected or unprotected files, not both");
+      setShowDeleteDialog(false);
+      return;
+    }
+    
+    // Delete the selected files
+    try {
+      const { error } = await supabase
+        .from("transcription_logs")
+        .delete()
+        .in("id", selectedIds);
+
+      if (error) throw error;
+
+      queryClient.invalidateQueries({ queryKey: ["cleanup-preview"] });
+      setSelectedFiles(new Set());
+      toast.success(`${selectedIds.length} file${selectedIds.length !== 1 ? 's' : ''} deleted`);
+    } catch (error: any) {
+      toast.error("Failed to delete files: " + error.message);
+    }
+    
+    setShowDeleteDialog(false);
+  };
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    if (!enabled || !duplicates || duplicates.length === 0) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+A / Cmd+A - Select all
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+        e.preventDefault();
+        selectAll();
+        toast.success("All files selected");
+        return;
+      }
+
+      // Delete key - Show delete dialog for selected files
+      if (e.key === 'Delete' && selectedFiles.size > 0) {
+        e.preventDefault();
+        handleDeleteSelected();
+        return;
+      }
+
+      // Escape - Deselect all
+      if (e.key === 'Escape' && selectedFiles.size > 0) {
+        e.preventDefault();
+        deselectAll();
+        toast.success("Selection cleared");
+        return;
+      }
+
+      // ? - Show keyboard hints
+      if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setShowKeyboardHints(!showKeyboardHints);
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [enabled, duplicates, selectedFiles, showKeyboardHints]);
+
   if (isLoading) {
     return (
       <Card>
@@ -237,6 +328,14 @@ export function DuplicateCleanupPreview({
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowKeyboardHints(!showKeyboardHints)}
+              className="h-8 w-8 p-0"
+            >
+              <Keyboard className="h-4 w-4" />
+            </Button>
             {totalProtected > 0 && (
               <Badge variant="secondary" className="text-sm">
                 <Shield className="h-3 w-3 mr-1" />
@@ -250,6 +349,18 @@ export function DuplicateCleanupPreview({
             )}
           </div>
         </div>
+        
+        {showKeyboardHints && (
+          <div className="mt-4 p-3 bg-muted/50 rounded-lg border border-border">
+            <div className="text-sm font-medium mb-2">Keyboard Shortcuts</div>
+            <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+              <div><kbd className="px-2 py-1 bg-background border rounded">Ctrl+A</kbd> Select all</div>
+              <div><kbd className="px-2 py-1 bg-background border rounded">Delete</kbd> Delete selected</div>
+              <div><kbd className="px-2 py-1 bg-background border rounded">Esc</kbd> Clear selection</div>
+              <div><kbd className="px-2 py-1 bg-background border rounded">?</kbd> Toggle hints</div>
+            </div>
+          </div>
+        )}
         
         {selectedFiles.size > 0 && (
           <div className="flex items-center gap-2 p-3 bg-muted rounded-lg border border-border mt-4">
@@ -272,6 +383,14 @@ export function DuplicateCleanupPreview({
             >
               <ShieldOff className="h-3 w-3 mr-2" />
               Unprotect
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={handleDeleteSelected}
+            >
+              <Trash2 className="h-3 w-3 mr-2" />
+              Delete
             </Button>
             <Button
               size="sm"
@@ -400,6 +519,24 @@ export function DuplicateCleanupPreview({
           </ScrollArea>
         )}
       </CardContent>
+
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Selected Files</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to permanently delete {selectedFiles.size} file{selectedFiles.size !== 1 ? 's' : ''}?
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }
