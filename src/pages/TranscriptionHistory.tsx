@@ -16,7 +16,7 @@ import { diffWords } from 'diff';
 import TagUsageHeatmap from "@/components/TagUsageHeatmap";
 import TagUsageStatistics from "@/components/TagUsageStatistics";
 import TagTemplateManager from "@/components/TagTemplateManager";
-import TagTemplatesManager from "@/components/TagTemplatesManager";
+import { cn } from "@/lib/utils";
 
 // Color palette themes for tags
 const COLOR_THEMES = {
@@ -234,6 +234,8 @@ export default function TranscriptionHistory() {
   const [newCategoryColor, setNewCategoryColor] = useState('#6b7280');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string | null>(null);
   const [tagTemplates, setTagTemplates] = useState<TagTemplate[]>([]);
+  const [analyticsStartDate, setAnalyticsStartDate] = useState<Date | undefined>(undefined);
+  const [analyticsEndDate, setAnalyticsEndDate] = useState<Date | undefined>(undefined);
 
   // Save filter preferences whenever they change
   useEffect(() => {
@@ -1687,11 +1689,130 @@ export default function TranscriptionHistory() {
         {/* Analytics Dashboard */}
         {showAnalytics && (
           <div className="mb-6 space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-4">
               <h2 className="text-2xl font-bold">Analytics Dashboard</h2>
-              <Button variant="outline" size="sm" onClick={() => setShowAnalytics(false)}>
-                Hide Analytics
-              </Button>
+              
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Date Range Selector */}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      <Calendar className="h-4 w-4 mr-2" />
+                      {analyticsStartDate && analyticsEndDate
+                        ? `${format(analyticsStartDate, "MMM d")} - ${format(analyticsEndDate, "MMM d, yyyy")}`
+                        : analyticsStartDate
+                        ? `From ${format(analyticsStartDate, "MMM d, yyyy")}`
+                        : analyticsEndDate
+                        ? `Until ${format(analyticsEndDate, "MMM d, yyyy")}`
+                        : "All Time"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="end">
+                    <div className="p-4 space-y-4">
+                      <div>
+                        <Label className="text-xs">Start Date</Label>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              className={cn(
+                                "w-full justify-start text-left font-normal mt-1",
+                                !analyticsStartDate && "text-muted-foreground"
+                              )}
+                            >
+                              <Calendar className="mr-2 h-4 w-4" />
+                              {analyticsStartDate ? format(analyticsStartDate, "PPP") : "Pick a date"}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <div className="p-3 pointer-events-auto">
+                              <div className="text-sm mb-2">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setAnalyticsStartDate(undefined)}
+                                  className="text-xs"
+                                >
+                                  Clear
+                                </Button>
+                              </div>
+                              <div className="border rounded-md">
+                                <div className="p-3">
+                                  <input
+                                    type="date"
+                                    value={analyticsStartDate ? format(analyticsStartDate, "yyyy-MM-dd") : ""}
+                                    onChange={(e) => setAnalyticsStartDate(e.target.value ? new Date(e.target.value) : undefined)}
+                                    className="w-full"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+
+                      <div>
+                        <Label className="text-xs">End Date</Label>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              className={cn(
+                                "w-full justify-start text-left font-normal mt-1",
+                                !analyticsEndDate && "text-muted-foreground"
+                              )}
+                            >
+                              <Calendar className="mr-2 h-4 w-4" />
+                              {analyticsEndDate ? format(analyticsEndDate, "PPP") : "Pick a date"}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <div className="p-3 pointer-events-auto">
+                              <div className="text-sm mb-2">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setAnalyticsEndDate(undefined)}
+                                  className="text-xs"
+                                >
+                                  Clear
+                                </Button>
+                              </div>
+                              <div className="border rounded-md">
+                                <div className="p-3">
+                                  <input
+                                    type="date"
+                                    value={analyticsEndDate ? format(analyticsEndDate, "yyyy-MM-dd") : ""}
+                                    onChange={(e) => setAnalyticsEndDate(e.target.value ? new Date(e.target.value) : undefined)}
+                                    className="w-full"
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+
+                      <div className="flex justify-between gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setAnalyticsStartDate(undefined);
+                            setAnalyticsEndDate(undefined);
+                          }}
+                        >
+                          Clear All
+                        </Button>
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+
+                <Button variant="outline" size="sm" onClick={() => setShowAnalytics(false)}>
+                  Hide Analytics
+                </Button>
+              </div>
             </div>
 
             {/* Success Rate Over Time */}
@@ -1909,7 +2030,12 @@ export default function TranscriptionHistory() {
 
                   {/* Tag Usage Statistics */}
                   <div className="lg:col-span-3">
-                    <TagUsageStatistics logs={logs} tags={tags} />
+                    <TagUsageStatistics 
+                      logs={logs} 
+                      tags={tags}
+                      startDate={analyticsStartDate}
+                      endDate={analyticsEndDate}
+                    />
                   </div>
 
                   {/* Tag Usage Heatmap */}
@@ -1918,6 +2044,8 @@ export default function TranscriptionHistory() {
                       <TagUsageHeatmap 
                         logs={logs} 
                         selectedTags={Array.from(selectedTagFilters)}
+                        startDate={analyticsStartDate}
+                        endDate={analyticsEndDate}
                       />
                     </CardContent>
                   </Card>

@@ -19,6 +19,8 @@ interface TranscriptionLog {
 interface TagUsageStatisticsProps {
   logs: TranscriptionLog[];
   tags: Tag[];
+  startDate?: Date;
+  endDate?: Date;
 }
 
 interface TagStats {
@@ -35,9 +37,18 @@ interface TagStats {
   trend: 'up' | 'down' | 'stable';
 }
 
-export default function TagUsageStatistics({ logs, tags }: TagUsageStatisticsProps) {
+export default function TagUsageStatistics({ logs, tags, startDate, endDate }: TagUsageStatisticsProps) {
   const statistics = useMemo(() => {
-    const now = new Date();
+    const now = endDate || new Date();
+    
+    // Filter logs by date range
+    const filteredLogs = logs.filter(log => {
+      const logDate = new Date(log.created_at);
+      if (startDate && logDate < startDate) return false;
+      if (endDate && logDate > endDate) return false;
+      return true;
+    });
+
     const thisWeekStart = startOfWeek(now);
     const lastWeekStart = startOfWeek(subWeeks(now, 1));
     const thisMonthStart = startOfMonth(now);
@@ -63,7 +74,7 @@ export default function TagUsageStatistics({ logs, tags }: TagUsageStatisticsPro
     });
 
     // Count tag usage across different time periods
-    logs.forEach(log => {
+    filteredLogs.forEach(log => {
       if (!log.tags || log.tags.length === 0) return;
 
       const logDate = new Date(log.created_at);
@@ -144,7 +155,7 @@ export default function TagUsageStatistics({ logs, tags }: TagUsageStatisticsPro
       fastestGrowingMonth,
       totalTagsUsed: allStats.filter(s => s.total > 0).length,
     };
-  }, [logs, tags]);
+  }, [logs, tags, startDate, endDate]);
 
   const getTrendIcon = (trend: 'up' | 'down' | 'stable') => {
     switch (trend) {

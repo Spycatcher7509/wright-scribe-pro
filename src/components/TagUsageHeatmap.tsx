@@ -20,19 +20,33 @@ interface TranscriptionLog {
 interface TagUsageHeatmapProps {
   logs: TranscriptionLog[];
   selectedTags?: string[];
+  startDate?: Date;
+  endDate?: Date;
 }
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
-export default function TagUsageHeatmap({ logs, selectedTags = [] }: TagUsageHeatmapProps) {
+export default function TagUsageHeatmap({ logs, selectedTags = [], startDate, endDate }: TagUsageHeatmapProps) {
   const heatmapRef = useRef<HTMLDivElement>(null);
+
+  // Filter logs by date range
+  const filteredLogs = useMemo(() => {
+    if (!startDate && !endDate) return logs;
+    
+    return logs.filter(log => {
+      const logDate = new Date(log.created_at);
+      if (startDate && logDate < startDate) return false;
+      if (endDate && logDate > endDate) return false;
+      return true;
+    });
+  }, [logs, startDate, endDate]);
 
   const heatmapData = useMemo(() => {
     // Initialize matrix: [day][hour] = count
     const matrix: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0));
     
-    logs.forEach(log => {
+    filteredLogs.forEach(log => {
       if (!log.tags || log.tags.length === 0) return;
       
       // Filter by selected tags if any
@@ -49,7 +63,7 @@ export default function TagUsageHeatmap({ logs, selectedTags = [] }: TagUsageHea
     });
     
     return matrix;
-  }, [logs, selectedTags]);
+  }, [filteredLogs, selectedTags]);
 
   const maxValue = useMemo(() => {
     return Math.max(...heatmapData.flat(), 1);
