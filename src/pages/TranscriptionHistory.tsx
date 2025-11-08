@@ -162,6 +162,25 @@ interface PresetComment {
   };
 }
 
+interface PresetRating {
+  id: string;
+  user_id: string;
+  preset_id: string;
+  rating: number;
+  created_at: string;
+}
+
+interface PresetComment {
+  id: string;
+  user_id: string;
+  preset_id: string;
+  comment: string;
+  created_at: string;
+  profiles?: {
+    email: string;
+  };
+}
+
 type SortField = 'file_title' | 'status' | 'created_at';
 type SortDirection = 'asc' | 'desc' | null;
 
@@ -283,9 +302,11 @@ export default function TranscriptionHistory() {
   const [showMarketplace, setShowMarketplace] = useState(false);
   const [sharedPresets, setSharedPresets] = useState<FilterPreset[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [selectedPresetForComments, setSelectedPresetForComments] = useState<FilterPreset | null>(null);
-  const [presetComments, setPresetComments] = useState<PresetComment[]>([]);
+  const [selectedPresetForDetails, setSelectedPresetForDetails] = useState<FilterPreset | null>(null);
+  const [presetRatings, setPresetRatings] = useState<Map<string, PresetRating[]>>(new Map());
+  const [presetComments, setPresetComments] = useState<Map<string, PresetComment[]>>(new Map());
   const [newComment, setNewComment] = useState('');
+  const [selectedPresetForComments, setSelectedPresetForComments] = useState<FilterPreset | null>(null);
 
   // Save filter preferences whenever they change
   useEffect(() => {
@@ -975,7 +996,7 @@ export default function TranscriptionHistory() {
     }
 
     if (data) {
-      setPresetComments(data as any);
+      setPresetComments(prev => new Map(prev).set(presetId, data as any));
     }
   };
 
@@ -4990,15 +5011,16 @@ export default function TranscriptionHistory() {
                 </div>
               </div>
 
-              {/* Comments List */}
-              {presetComments.length === 0 ? (
+              {!selectedPresetForComments || 
+               !presetComments.get(selectedPresetForComments.id) || 
+               presetComments.get(selectedPresetForComments.id)!.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
                   <MessageSquare className="h-12 w-12 mx-auto mb-2 opacity-50" />
                   <p>No comments yet. Be the first to share your thoughts!</p>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {presetComments.map((comment) => (
+                  {presetComments.get(selectedPresetForComments.id)!.map((comment) => (
                     <div key={comment.id} className="p-3 border rounded-lg bg-muted/20">
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
