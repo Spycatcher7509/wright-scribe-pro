@@ -83,19 +83,10 @@ function extractVideoId(url: string): string | null {
   return null;
 }
 
-// Download audio from YouTube using ytdl-core compatible approach
-async function downloadYouTubeAudio(videoId: string): Promise<{ audioBlob: Blob; title: string }> {
-  // Get video title from YouTube oEmbed API
-  const videoInfoResponse = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
-  let title = `YouTube Video ${videoId}`;
+// Strategy 1: Using y2mate.com API
+async function downloadWithY2mate(videoId: string, title: string): Promise<Blob> {
+  console.log("Attempting download with y2mate...");
   
-  if (videoInfoResponse.ok) {
-    const videoInfo = await videoInfoResponse.json();
-    title = videoInfo.title || title;
-  }
-
-  // Use a third-party service to download YouTube audio
-  // Option 1: Using y2mate.com API (free alternative)
   const downloadResponse = await fetch(`https://www.y2mate.com/mates/analyzeV2/ajax`, {
     method: "POST",
     headers: {
@@ -110,24 +101,22 @@ async function downloadYouTubeAudio(videoId: string): Promise<{ audioBlob: Blob;
   });
 
   if (!downloadResponse.ok) {
-    throw new Error(`Failed to analyze YouTube video: ${await downloadResponse.text()}`);
+    throw new Error(`Y2mate analyze failed: ${downloadResponse.status}`);
   }
 
   const analyzeData = await downloadResponse.json();
   
   if (!analyzeData.links || !analyzeData.links.mp3) {
-    throw new Error("No audio format available for this video");
+    throw new Error("Y2mate: No audio format available");
   }
 
-  // Get the best quality MP3
   const audioFormats = Object.values(analyzeData.links.mp3) as any[];
   const bestAudio = audioFormats.find((f: any) => f.q === "128") || audioFormats[0];
   
   if (!bestAudio || !bestAudio.k) {
-    throw new Error("Could not find suitable audio format");
+    throw new Error("Y2mate: Could not find suitable audio format");
   }
 
-  // Get download link
   const convertResponse = await fetch(`https://www.y2mate.com/mates/convertV2/index`, {
     method: "POST",
     headers: {
@@ -140,25 +129,139 @@ async function downloadYouTubeAudio(videoId: string): Promise<{ audioBlob: Blob;
   });
 
   if (!convertResponse.ok) {
-    throw new Error(`Failed to convert video: ${await convertResponse.text()}`);
+    throw new Error(`Y2mate convert failed: ${convertResponse.status}`);
   }
 
   const convertData = await convertResponse.json();
   
   if (!convertData.dlink) {
-    throw new Error("Failed to get download link");
+    throw new Error("Y2mate: Failed to get download link");
   }
 
-  // Download the audio file
   const audioResponse = await fetch(convertData.dlink);
   
   if (!audioResponse.ok) {
-    throw new Error("Failed to download audio file");
+    throw new Error(`Y2mate download failed: ${audioResponse.status}`);
   }
 
-  const audioBlob = await audioResponse.blob();
+  console.log("Successfully downloaded with y2mate");
+  return await audioResponse.blob();
+}
 
-  return { audioBlob, title };
+// Strategy 2: Using SaveFrom.net API
+async function downloadWithSaveFrom(videoId: string, title: string): Promise<Blob> {
+  console.log("Attempting download with SaveFrom...");
+  
+  const apiUrl = `https://api.savefrom.net/api/v1/download`;
+  const response = await fetch(apiUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams({
+      url: `https://www.youtube.com/watch?v=${videoId}`,
+      format: "mp3",
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`SaveFrom API failed: ${response.status}`);
+  }
+
+  const data = await response.json();
+  
+  if (!data.url) {
+    throw new Error("SaveFrom: No download URL returned");
+  }
+
+  const audioResponse = await fetch(data.url);
+  
+  if (!audioResponse.ok) {
+    throw new Error(`SaveFrom download failed: ${audioResponse.status}`);
+  }
+
+  console.log("Successfully downloaded with SaveFrom");
+  return await audioResponse.blob();
+}
+
+// Strategy 3: Direct YouTube audio stream extraction (fallback)
+async function downloadDirectStream(videoId: string, title: string): Promise<Blob> {
+  console.log("Attempting direct stream extraction...");
+  
+  // Use a public proxy service that can extract YouTube streams
+  const proxyUrl = `https://invidious.io/api/v1/videos/${videoId}`;
+  
+  const response = await fetch(proxyUrl);
+  
+  if (!response.ok) {
+    throw new Error(`Direct stream API failed: ${response.status}`);
+  }
+
+  const videoData = await response.json();
+  
+  if (!videoData.adaptiveFormats) {
+    throw new Error("Direct stream: No formats available");
+  }
+
+  // Find audio-only format
+  const audioFormat = videoData.adaptiveFormats.find(
+    (f: any) => f.type?.includes("audio/mp4") || f.type?.includes("audio/webm")
+  );
+  
+  if (!audioFormat || !audioFormat.url) {
+    throw new Error("Direct stream: No audio format found");
+  }
+
+  const audioResponse = await fetch(audioFormat.url);
+  
+  if (!audioResponse.ok) {
+    throw new Error(`Direct stream download failed: ${audioResponse.status}`);
+  }
+
+  console.log("Successfully downloaded with direct stream");
+  return await audioResponse.blob();
+}
+
+// Main download function with fallback logic
+async function downloadYouTubeAudio(videoId: string): Promise<{ audioBlob: Blob; title: string }> {
+  // Get video title from YouTube oEmbed API
+  const videoInfoResponse = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
+  let title = `YouTube Video ${videoId}`;
+  
+  if (videoInfoResponse.ok) {
+    const videoInfo = await videoInfoResponse.json();
+    title = videoInfo.title || title;
+  }
+
+  // Define download strategies in order of preference
+  const strategies = [
+    { name: "y2mate", fn: downloadWithY2mate },
+    { name: "savefrom", fn: downloadWithSaveFrom },
+    { name: "direct", fn: downloadDirectStream },
+  ];
+
+  const errors: { strategy: string; error: string }[] = [];
+
+  // Try each strategy in order
+  for (const strategy of strategies) {
+    try {
+      console.log(`Trying strategy: ${strategy.name}`);
+      const audioBlob = await strategy.fn(videoId, title);
+      console.log(`Success with strategy: ${strategy.name}`);
+      return { audioBlob, title };
+    } catch (error: any) {
+      const errorMsg = error.message || "Unknown error";
+      console.error(`Strategy ${strategy.name} failed:`, errorMsg);
+      errors.push({ strategy: strategy.name, error: errorMsg });
+      
+      // Continue to next strategy
+      continue;
+    }
+  }
+
+  // All strategies failed
+  const errorSummary = errors.map(e => `${e.strategy}: ${e.error}`).join("; ");
+  throw new Error(`All download strategies failed. Errors: ${errorSummary}`);
 }
 
 serve(async (req: Request) => {
