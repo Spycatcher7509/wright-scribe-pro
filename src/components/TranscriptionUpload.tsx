@@ -68,6 +68,7 @@ export function TranscriptionUpload() {
     type: 'info' | 'success' | 'error' | 'warning';
     message: string;
   }>>([]);
+  const [forceTranscribe, setForceTranscribe] = useState(false);
   
   // Extract video ID for progress tracking
   const extractVideoId = (url: string): string | null => {
@@ -560,16 +561,21 @@ export function TranscriptionUpload() {
       return;
     }
 
-    // Block transcription if captions aren't available
-    if (captionStatus.available === false) {
-      toast.error("This video doesn't have captions. Please select a video with captions/subtitles.");
+    // Block transcription if captions aren't available (unless force override is enabled)
+    if (captionStatus.available === false && !forceTranscribe) {
+      toast.error("This video doesn't have captions. Please select a video with captions/subtitles or use the 'Force Transcribe' option.");
       return;
     }
 
     // Wait for caption check to complete
-    if (captionStatus.available === null && !captionStatus.checking) {
+    if (captionStatus.available === null && !captionStatus.checking && !forceTranscribe) {
       toast.warning("Checking caption availability... Please wait.");
       return;
+    }
+
+    if (forceTranscribe) {
+      toast.info("Force transcribe enabled - attempting transcription regardless of caption status...");
+      addDebugLog('warning', 'Manual override: Force transcribe enabled');
     }
 
     const maxRetries = 3;
@@ -670,6 +676,8 @@ export function TranscriptionUpload() {
     setSelectedVideos(new Set());
     setIsBulkProcessing(false);
     setBatchVideoIds([]);
+    setForceTranscribe(false);
+    setDebugLogs([]);
   };
 
   const handleUseCachedResult = (log: any) => {
@@ -1361,8 +1369,8 @@ export function TranscriptionUpload() {
                   !youtubeUrl.trim() || 
                   isProcessing || 
                   captionStatus.checking ||
-                  captionStatus.available === false ||
-                  captionStatus.available === null
+                  (captionStatus.available === false && !forceTranscribe) ||
+                  (captionStatus.available === null && !forceTranscribe)
                 }
                 className="w-full"
               >
@@ -1376,12 +1384,12 @@ export function TranscriptionUpload() {
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Checking Captions...
                   </>
-                ) : captionStatus.available === false ? (
+                ) : captionStatus.available === false && !forceTranscribe ? (
                   <>
                     <AlertTriangle className="mr-2 h-4 w-4" />
                     No Captions Available
                   </>
-                ) : captionStatus.available === null ? (
+                ) : captionStatus.available === null && !forceTranscribe ? (
                   <>
                     <AlertCircle className="mr-2 h-4 w-4" />
                     Waiting for Caption Check...
@@ -1389,19 +1397,53 @@ export function TranscriptionUpload() {
                 ) : (
                   <>
                     <Youtube className="mr-2 h-4 w-4" />
-                    Transcribe YouTube Video
+                    {forceTranscribe ? 'Force Transcribe Video' : 'Transcribe YouTube Video'}
                   </>
                 )}
               </Button>
               
               {captionStatus.available === false && youtubeUrl.trim() && !isProcessing && (
-                <Alert variant="destructive" className="border-red-500">
-                  <AlertTriangle className="h-4 w-4" />
-                  <AlertDescription>
-                    <strong className="font-semibold">Captions Required</strong>
-                    <p className="text-sm mt-1">This video doesn't have captions/subtitles enabled. Please select a different video that has captions available.</p>
-                  </AlertDescription>
-                </Alert>
+                <div className="space-y-3">
+                  <Alert variant="destructive" className="border-red-500">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertDescription>
+                      <strong className="font-semibold">Captions Required</strong>
+                      <p className="text-sm mt-1">This video doesn't have captions/subtitles enabled. Please select a different video that has captions available.</p>
+                    </AlertDescription>
+                  </Alert>
+                  
+                  <Alert className="border-yellow-500 bg-yellow-50 dark:bg-yellow-950">
+                    <Shield className="h-4 w-4 text-yellow-600 dark:text-yellow-400" />
+                    <AlertDescription className="text-yellow-700 dark:text-yellow-300">
+                      <div className="space-y-3">
+                        <div>
+                          <strong className="font-semibold">Force Transcribe Option</strong>
+                          <p className="text-sm mt-1">
+                            Sometimes caption detection fails even when captions exist. You can enable force transcribe to attempt the transcription anyway.
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            id="force-transcribe"
+                            checked={forceTranscribe}
+                            onCheckedChange={(checked) => setForceTranscribe(checked as boolean)}
+                          />
+                          <label
+                            htmlFor="force-transcribe"
+                            className="text-sm font-medium cursor-pointer"
+                          >
+                            Enable Force Transcribe (bypass caption detection)
+                          </label>
+                        </div>
+                        {forceTranscribe && (
+                          <p className="text-xs opacity-75">
+                            ⚠️ Warning: This may fail if the video truly has no captions available.
+                          </p>
+                        )}
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                </div>
               )}
             </TabsContent>
           </Tabs>
