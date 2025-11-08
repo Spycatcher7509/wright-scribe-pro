@@ -613,6 +613,15 @@ export function TranscriptionUpload() {
 
         return data;
       } catch (error: any) {
+        // Don't retry if video doesn't have captions - that won't change
+        const errorMessage = error?.message || error || '';
+        const isCaptionError = errorMessage.includes('does not have captions') || 
+                              errorMessage.includes('subtitles available');
+        
+        if (isCaptionError) {
+          throw error; // Don't retry caption availability issues
+        }
+        
         if (retryAttempt < maxRetries) {
           const backoffDelay = Math.pow(2, retryAttempt) * 1000; // 1s, 2s, 4s
           toast.info(`Attempt ${retryAttempt + 1} failed. Retrying in ${backoffDelay / 1000}s...`, {
@@ -651,7 +660,19 @@ export function TranscriptionUpload() {
 
     // All retries failed
     console.error("YouTube transcription error:", lastError);
-    toast.error(lastError.message || "Failed to transcribe YouTube video after multiple attempts");
+    
+    const errorMessage = lastError?.message || "Failed to transcribe YouTube video";
+    const isCaptionError = errorMessage.includes('does not have captions') || 
+                          errorMessage.includes('subtitles available');
+    
+    if (isCaptionError) {
+      toast.error("⚠️ This video doesn't have captions. Please check caption availability first or try a different video.", {
+        duration: 6000,
+      });
+    } else {
+      toast.error(errorMessage + " after multiple attempts");
+    }
+    
     setIsProcessing(false);
     setProgress(0);
   };
