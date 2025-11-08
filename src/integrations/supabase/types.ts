@@ -224,6 +224,42 @@ export type Database = {
         }
         Relationships: []
       }
+      preset_backups: {
+        Row: {
+          backed_up_at: string
+          backup_reason: string
+          created_at: string
+          id: string
+          original_preset_id: string | null
+          preset_description: string | null
+          preset_filter_data: Json
+          preset_name: string
+          user_id: string
+        }
+        Insert: {
+          backed_up_at?: string
+          backup_reason?: string
+          created_at?: string
+          id?: string
+          original_preset_id?: string | null
+          preset_description?: string | null
+          preset_filter_data: Json
+          preset_name: string
+          user_id: string
+        }
+        Update: {
+          backed_up_at?: string
+          backup_reason?: string
+          created_at?: string
+          id?: string
+          original_preset_id?: string | null
+          preset_description?: string | null
+          preset_filter_data?: Json
+          preset_name?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       preset_comments: {
         Row: {
           comment: string

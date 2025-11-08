@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Loader2, FileText, Check, X, Shield, ShieldOff, Trash2, Keyboard, Search, Filter, CalendarIcon, Save, Star, StarOff, Download, Upload, FolderDown, AlertTriangle } from "lucide-react";
+import { Loader2, FileText, Check, X, Shield, ShieldOff, Trash2, Keyboard, Search, Filter, CalendarIcon, Save, Star, StarOff, Download, Upload, FolderDown, AlertTriangle, History, RotateCcw } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { toast } from "sonner";
 
@@ -74,6 +74,27 @@ export function DuplicateCleanupPreview({
   const [showConflictDialog, setShowConflictDialog] = useState(false);
   const [conflictingPresets, setConflictingPresets] = useState<any[]>([]);
   const [conflictResolution, setConflictResolution] = useState<"skip" | "rename" | "overwrite">("rename");
+  const [showBackupsDialog, setShowBackupsDialog] = useState(false);
+  
+  // Fetch preset backups
+  const { data: presetBackups } = useQuery({
+    queryKey: ["preset-backups"],
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      const { data, error } = await supabase
+        .from("preset_backups")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("backed_up_at", { ascending: false })
+        .limit(50);
+
+      if (error) throw error;
+      return data;
+    },
+  });
+
   // Fetch filter presets
   const { data: filterPresets } = useQuery({
     queryKey: ["cleanup-filter-presets"],
@@ -540,36 +561,58 @@ export function DuplicateCleanupPreview({
 
     const { data: existingPresets } = await supabase
       .from("filter_presets")
-      .select("name, id")
+      .select("*")
       .eq("user_id", user.id);
 
-    const existingNames = new Map(existingPresets?.map(p => [p.name, p.id]) || []);
+    const existingMap = new Map(existingPresets?.map(p => [p.name, p]) || []);
     const presetsToInsert: any[] = [];
     const presetsToUpdate: any[] = [];
+    const backupsToCreate: any[] = [];
     let skippedCount = 0;
 
     for (const preset of presetsToImport) {
-      if (existingNames.has(preset.name)) {
+      const existingPreset = existingMap.get(preset.name);
+      
+      if (existingPreset) {
         if (resolution === "skip") {
           skippedCount++;
         } else if (resolution === "rename") {
           // Find a unique name
           let counter = 1;
           let newName = `${preset.name} (${counter})`;
-          while (existingNames.has(newName) || presetsToInsert.some(p => p.name === newName)) {
+          while (existingMap.has(newName) || presetsToInsert.some(p => p.name === newName)) {
             counter++;
             newName = `${preset.name} (${counter})`;
           }
           presetsToInsert.push({ ...preset, name: newName });
         } else if (resolution === "overwrite") {
+          // Create backup before overwriting
+          backupsToCreate.push({
+            user_id: user.id,
+            original_preset_id: existingPreset.id,
+            preset_name: existingPreset.name,
+            preset_description: existingPreset.description,
+            preset_filter_data: existingPreset.filter_data,
+            backup_reason: 'import_overwrite'
+          });
+          
           presetsToUpdate.push({
-            id: existingNames.get(preset.name),
+            id: existingPreset.id,
             ...preset
           });
         }
       } else {
         presetsToInsert.push(preset);
       }
+    }
+
+    // Create backups first
+    if (backupsToCreate.length > 0) {
+      const { error: backupError } = await supabase
+        .from("preset_backups")
+        .insert(backupsToCreate);
+      
+      if (backupError) throw new Error(`Failed to create backups: ${backupError.message}`);
     }
 
     // Insert new presets
@@ -592,7 +635,12 @@ export function DuplicateCleanupPreview({
       if (error) throw error;
     }
 
-    return { inserted: presetsToInsert.length, updated: presetsToUpdate.length, skipped: skippedCount };
+    return { 
+      inserted: presetsToInsert.length, 
+      updated: presetsToUpdate.length, 
+      skipped: skippedCount,
+      backedUp: backupsToCreate.length
+    };
   };
 
   const handleBulkImport = async (zipFile: File) => {
@@ -681,8 +729,9 @@ export function DuplicateCleanupPreview({
     try {
       const result = await resolveConflicts(conflictingPresets, conflictResolution);
       
-      // Refresh presets list
+      // Refresh presets list and backups
       queryClient.invalidateQueries({ queryKey: ["cleanup-filter-presets"] });
+      queryClient.invalidateQueries({ queryKey: ["preset-backups"] });
       setShowImportDialog(false);
       setImportFile(null);
       setConflictingPresets([]);
@@ -690,6 +739,7 @@ export function DuplicateCleanupPreview({
       const messages: string[] = [];
       if (result.inserted > 0) messages.push(`${result.inserted} imported`);
       if (result.updated > 0) messages.push(`${result.updated} overwritten`);
+      if (result.backedUp > 0) messages.push(`${result.backedUp} backed up`);
       if (result.skipped > 0) messages.push(`${result.skipped} skipped`);
       
       toast.success(messages.join(", "));
@@ -699,6 +749,71 @@ export function DuplicateCleanupPreview({
       setIsBulkExporting(false);
     }
   };
+
+  const restoreFromBackup = useMutation({
+    mutationFn: async (backup: any) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      // Check if a preset with this name already exists
+      const { data: existing } = await supabase
+        .from("filter_presets")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("name", backup.preset_name)
+        .maybeSingle();
+
+      if (existing) {
+        // Update existing preset
+        const { error } = await supabase
+          .from("filter_presets")
+          .update({
+            description: backup.preset_description,
+            filter_data: backup.preset_filter_data,
+          })
+          .eq("id", existing.id);
+        
+        if (error) throw error;
+      } else {
+        // Create new preset from backup
+        const { error } = await supabase
+          .from("filter_presets")
+          .insert({
+            user_id: user.id,
+            name: backup.preset_name,
+            description: backup.preset_description,
+            filter_data: backup.preset_filter_data,
+          });
+        
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["cleanup-filter-presets"] });
+      toast.success("Preset restored from backup");
+    },
+    onError: (error: any) => {
+      toast.error("Failed to restore preset: " + error.message);
+    },
+  });
+
+  const deleteBackup = useMutation({
+    mutationFn: async (backupId: string) => {
+      const { error } = await supabase
+        .from("preset_backups")
+        .delete()
+        .eq("id", backupId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["preset-backups"] });
+      toast.success("Backup deleted");
+    },
+    onError: (error: any) => {
+      toast.error("Failed to delete backup: " + error.message);
+    },
+  });
 
   const exportAllPresets = async () => {
     if (!filterPresets || filterPresets.length === 0) {
@@ -966,6 +1081,16 @@ export function DuplicateCleanupPreview({
                 ) : (
                   <FolderDown className="h-4 w-4" />
                 )}
+              </Button>
+            )}
+            {presetBackups && presetBackups.length > 0 && (
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => setShowBackupsDialog(true)}
+                title="View preset backups"
+              >
+                <History className="h-4 w-4" />
               </Button>
             )}
           </div>
@@ -1461,6 +1586,93 @@ export function DuplicateCleanupPreview({
             >
               {isBulkExporting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Continue Import
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showBackupsDialog} onOpenChange={setShowBackupsDialog}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <History className="h-5 w-5" />
+              Preset Backups
+            </DialogTitle>
+            <DialogDescription>
+              Restore presets that were backed up before being overwritten during import
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="flex-1 pr-4">
+            <div className="space-y-3">
+              {presetBackups && presetBackups.length > 0 ? (
+                presetBackups.map((backup) => (
+                  <div key={backup.id} className="p-4 rounded-lg border bg-card space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-sm">{backup.preset_name}</div>
+                        {backup.preset_description && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {backup.preset_description}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
+                          <span>
+                            Backed up {formatDistanceToNow(new Date(backup.backed_up_at), { addSuffix: true })}
+                          </span>
+                          <Badge variant="outline" className="text-xs">
+                            {backup.backup_reason === 'import_overwrite' ? 'Import Overwrite' : backup.backup_reason}
+                          </Badge>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="default"
+                          size="sm"
+                          onClick={() => restoreFromBackup.mutate(backup)}
+                          disabled={restoreFromBackup.isPending}
+                        >
+                          {restoreFromBackup.isPending ? (
+                            <Loader2 className="h-3 w-3 mr-2 animate-spin" />
+                          ) : (
+                            <RotateCcw className="h-3 w-3 mr-2" />
+                          )}
+                          Restore
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => deleteBackup.mutate(backup.id)}
+                          disabled={deleteBackup.isPending}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                    
+                    <details className="text-xs">
+                      <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                        View filter details
+                      </summary>
+                      <div className="mt-2 p-2 bg-muted/50 rounded border">
+                        <pre className="text-xs overflow-auto">
+                          {JSON.stringify(backup.preset_filter_data, null, 2)}
+                        </pre>
+                      </div>
+                    </details>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  <History className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                  <p>No backups available</p>
+                  <p className="text-xs mt-1">Backups are created automatically when presets are overwritten during import</p>
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowBackupsDialog(false)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>
