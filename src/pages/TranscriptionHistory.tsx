@@ -236,6 +236,7 @@ export default function TranscriptionHistory() {
   const [tagTemplates, setTagTemplates] = useState<TagTemplate[]>([]);
   const [analyticsStartDate, setAnalyticsStartDate] = useState<Date | undefined>(undefined);
   const [analyticsEndDate, setAnalyticsEndDate] = useState<Date | undefined>(undefined);
+  const [showQuickTagMenu, setShowQuickTagMenu] = useState(false);
 
   // Save filter preferences whenever they change
   useEffect(() => {
@@ -450,6 +451,60 @@ export default function TranscriptionHistory() {
       supabase.removeChannel(templateTagsChannel);
     };
   }, []);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if user is typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      // Ctrl+T to open tag menu
+      if (e.ctrlKey && e.key === 't') {
+        e.preventDefault();
+        setShowQuickTagMenu(prev => !prev);
+        toast.info('Quick tag menu toggled');
+      }
+
+      // Ctrl+1-9 for frequently used tags
+      if (e.ctrlKey && e.key >= '1' && e.key <= '9') {
+        e.preventDefault();
+        const index = parseInt(e.key) - 1;
+        
+        // Get most frequently used tags
+        const tagUsageMap = new Map<string, number>();
+        logs.forEach(log => {
+          log.tags?.forEach(tag => {
+            tagUsageMap.set(tag.id, (tagUsageMap.get(tag.id) || 0) + 1);
+          });
+        });
+        
+        const sortedTags = tags
+          .map(tag => ({
+            ...tag,
+            count: tagUsageMap.get(tag.id) || 0
+          }))
+          .sort((a, b) => b.count - a.count);
+        
+        const quickTag = sortedTags[index];
+        
+        if (quickTag) {
+          if (selectedIds.size > 0) {
+            handleBulkAddTag(quickTag.id);
+            toast.success(`Applied "${quickTag.name}" to ${selectedIds.size} selected transcription(s)`);
+          } else {
+            toast.info(`Quick tag ${index + 1}: ${quickTag.name} (Select transcriptions to apply)`);
+          }
+        } else {
+          toast.error(`No tag assigned to Ctrl+${e.key}`);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [tags, logs, selectedIds]);
 
   useEffect(() => {
     filterLogs();
@@ -3231,6 +3286,27 @@ export default function TranscriptionHistory() {
                     F5
                   </kbd>
                 </div>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-sm font-semibold mb-3">Tag Operations</h3>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between py-2 px-3 rounded-md hover:bg-muted/50">
+                  <span className="text-sm">Toggle quick tag menu</span>
+                  <kbd className="px-2 py-1 text-xs font-semibold bg-muted border border-border rounded">
+                    Ctrl + T
+                  </kbd>
+                </div>
+                <div className="flex items-center justify-between py-2 px-3 rounded-md hover:bg-muted/50">
+                  <span className="text-sm">Apply frequently used tag #1-9</span>
+                  <kbd className="px-2 py-1 text-xs font-semibold bg-muted border border-border rounded">
+                    Ctrl + 1-9
+                  </kbd>
+                </div>
+                <p className="text-xs text-muted-foreground px-3 py-1">
+                  Tip: Select transcriptions first, then use Ctrl+1-9 to apply your top 9 most-used tags
+                </p>
               </div>
             </div>
 
